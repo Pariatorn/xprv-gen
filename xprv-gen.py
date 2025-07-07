@@ -22,9 +22,35 @@ Usage:
 """
 
 import sys
+from enum import Enum
 from typing import List, Optional, Tuple
 
 import bsv.hd
+
+# Constants
+SEED_LENGTH_64 = 64
+SEED_LENGTH_32 = 32
+HARDENED_KEY_FLAG = 0x80000000
+DERIVATION_PATH_PREFIX = "m"
+PBKDF2_ITERATIONS = 2048
+ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+# Menu options
+class MenuChoice(Enum):
+    """Menu choice enumeration"""
+
+    LOAD_FROM_MNEMONIC = "1"
+    LOAD_FROM_XPRV = "2"
+    GENERATE_NEW_WALLET = "3"
+    SHOW_MASTER_XPUB = "4"
+    DERIVE_SINGLE_KEY = "5"
+    DERIVE_KEY_RANGE = "6"
+    EXIT = "7"
+
+
+# Test mode identifier
+TEST_MODE_ARG = "test"
 
 
 class HDWalletTool:
@@ -68,9 +94,8 @@ class HDWalletTool:
                     seed = hashlib.pbkdf2_hmac(
                         "sha512",
                         normalized_mnemonic.encode("utf-8"),
-                        # Electrum uses "electrum" as salt instead of "mnemonic"
-                        b"electrum",
-                        2048,  # Same iteration count as BIP39
+                        b"electrum",  # Electrum uses "electrum" salt vs "mnemonic"
+                        PBKDF2_ITERATIONS,  # Same iteration count as BIP39
                     )
                 else:
                     print(
@@ -78,7 +103,10 @@ class HDWalletTool:
                     )
                     # Still try to generate seed (for compatibility)
                     seed = hashlib.pbkdf2_hmac(
-                        "sha512", normalized_mnemonic.encode("utf-8"), b"electrum", 2048
+                        "sha512",
+                        normalized_mnemonic.encode("utf-8"),
+                        b"electrum",
+                        PBKDF2_ITERATIONS,
                     )
 
             # Create master xprv from seed
@@ -100,21 +128,21 @@ class HDWalletTool:
             if xprv_string.startswith("xprv"):
                 # Parse as proper xprv string
                 self.master_xprv = bsv.hd.Xprv(xprv_string)
-            elif len(xprv_string) == 64:
+            elif len(xprv_string) == SEED_LENGTH_64:
                 # Assume it's a hex private key and create from that
                 seed = bytes.fromhex(xprv_string)
                 # Pad to proper seed length if needed
-                if len(seed) < 64:
-                    seed = seed + b"\x00" * (64 - len(seed))
+                if len(seed) < SEED_LENGTH_64:
+                    seed = seed + b"\x00" * (SEED_LENGTH_64 - len(seed))
                 self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
             else:
                 # Try to decode as base58 and extract key
                 decoded = self._base58_decode(xprv_string)
-                if len(decoded) >= 32:
+                if len(decoded) >= SEED_LENGTH_32:
                     # Extract the private key (skip version and checksum)
                     private_key_bytes = decoded[1:33]
                     # Pad to 64 bytes for seed
-                    seed = private_key_bytes + b"\x00" * 32
+                    seed = private_key_bytes + b"\x00" * SEED_LENGTH_32
                     self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
                 else:
                     raise ValueError("Invalid xprv format")
@@ -130,10 +158,9 @@ class HDWalletTool:
 
     def _base58_decode(self, s: str) -> bytes:
         """Decode base58 string"""
-        alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
         num = 0
         for char in s:
-            num = num * 58 + alphabet.index(char)
+            num = num * 58 + ALPHABET.index(char)
 
         # Convert to bytes
         hex_str = hex(num)[2:].rstrip("L")
@@ -167,8 +194,10 @@ class HDWalletTool:
         try:
             # Parse derivation path
             path_parts = derivation_path.strip().split("/")
-            if path_parts[0] != "m":
-                raise ValueError("Derivation path must start with 'm'")
+            if path_parts[0] != DERIVATION_PATH_PREFIX:
+                raise ValueError(
+                    f"Derivation path must start with '{DERIVATION_PATH_PREFIX}'"
+                )
 
             # Start with master key
             current_key = self.master_xprv
@@ -177,7 +206,7 @@ class HDWalletTool:
             for part in path_parts[1:]:
                 if part.endswith("'") or part.endswith("h"):
                     # Hardened derivation
-                    index = int(part[:-1]) | 0x80000000
+                    index = int(part[:-1]) | HARDENED_KEY_FLAG
                 else:
                     # Non-hardened derivation
                     index = int(part)
@@ -242,44 +271,46 @@ class HDWalletTool:
                     print()
 
                 return results
-            else:
-                # Manual derivation when no mnemonic is available
-                results = []
 
-                # Parse base path to get the key at that level
-                base_parts = base_path.strip().split("/")
-                if base_parts[0] != "m":
-                    raise ValueError("Base path must start with 'm'")
+            # Manual derivation when no mnemonic is available
+            results = []
 
-                # Derive to the base path
-                current_key = self.master_xprv
-                for part in base_parts[1:]:
-                    if part.endswith("'") or part.endswith("h"):
-                        index = int(part[:-1]) | 0x80000000
-                    else:
-                        index = int(part)
-                    current_key = current_key.ckd(index)
+            # Parse base path to get the key at that level
+            base_parts = base_path.strip().split("/")
+            if base_parts[0] != DERIVATION_PATH_PREFIX:
+                raise ValueError(
+                    f"Base path must start with '{DERIVATION_PATH_PREFIX}'"
+                )
 
-                # Now derive the range
-                for i in range(start_index, end_index + 1):
-                    # Derive for external addresses (0) and then the index
-                    external_key = current_key.ckd(0)  # Change index 0 = external
-                    final_key = external_key.ckd(i)
+            # Derive to the base path
+            current_key = self.master_xprv
+            for part in base_parts[1:]:
+                if part.endswith("'") or part.endswith("h"):
+                    index = int(part[:-1]) | HARDENED_KEY_FLAG
+                else:
+                    index = int(part)
+                current_key = current_key.ckd(index)
 
-                    full_path = f"{base_path}/0/{i}"
-                    wif = final_key.private_key().wif()
-                    public_key_hex = final_key.public_key().hex()
-                    address = final_key.address()
+            # Now derive the range
+            for i in range(start_index, end_index + 1):
+                # Derive for external addresses (0) and then the index
+                external_key = current_key.ckd(0)  # Change index 0 = external
+                final_key = external_key.ckd(i)
 
-                    results.append((full_path, wif, public_key_hex, address))
+                full_path = f"{base_path}/0/{i}"
+                wif = final_key.private_key().wif()
+                public_key_hex = final_key.public_key().hex()
+                address = final_key.address()
 
-                    print(f"✓ {full_path}")
-                    print(f"  Private Key (WIF): {wif}")
-                    print(f"  Public Key (hex): {public_key_hex}")
-                    print(f"  Address: {address}")
-                    print()
+                results.append((full_path, wif, public_key_hex, address))
 
-                return results
+                print(f"✓ {full_path}")
+                print(f"  Private Key (WIF): {wif}")
+                print(f"  Public Key (hex): {public_key_hex}")
+                print(f"  Address: {address}")
+                print()
+
+            return results
 
         except Exception as e:
             print(f"✗ Error deriving key range: {e}")
@@ -318,95 +349,129 @@ def print_menu():
     print("=" * 60)
 
 
+def handle_load_from_mnemonic(wallet: HDWalletTool) -> None:
+    """Handle loading wallet from mnemonic"""
+    print("\n--- Load from Mnemonic ---")
+    mnemonic = input("Enter mnemonic seed phrase: ").strip()
+    if mnemonic:
+        wallet.load_from_mnemonic(mnemonic)
+    else:
+        print("✗ Empty mnemonic provided")
+
+
+def handle_load_from_xprv(wallet: HDWalletTool) -> None:
+    """Handle loading wallet from xprv"""
+    print("\n--- Load from xprv ---")
+    xprv = input("Enter master private key (xprv): ").strip()
+    if xprv:
+        wallet.load_from_xprv(xprv)
+    else:
+        print("✗ Empty xprv provided")
+
+
+def handle_generate_new_wallet(wallet: HDWalletTool) -> None:
+    """Handle generating new wallet"""
+    print("\n--- Generate New Wallet ---")
+    entropy_input = input("Enter entropy (hex, or press Enter for random): ").strip()
+    entropy: Optional[str] = entropy_input if entropy_input else None
+    wallet.generate_new_wallet(entropy)
+
+
+def handle_show_master_xpub(wallet: HDWalletTool) -> None:
+    """Handle showing master xpub"""
+    print("\n--- Master xpub ---")
+    wallet.get_master_xpub()
+
+
+def handle_derive_single_key(wallet: HDWalletTool) -> None:
+    """Handle deriving single key"""
+    print("\n--- Derive Single Key ---")
+    path = input("Enter derivation path (e.g., m/0/1234): ").strip()
+    if path:
+        wallet.derive_single_key(path)
+    else:
+        print("✗ Empty path provided")
+
+
+def handle_derive_key_range(wallet: HDWalletTool) -> None:
+    """Handle deriving key range"""
+    print("\n--- Derive Key Range ---")
+    base_path = input("Enter base path (e.g., m/44'/0'/0'): ").strip()
+    try:
+        start_idx = int(input("Enter start index: ").strip())
+        end_idx = int(input("Enter end index: ").strip())
+        if base_path and start_idx <= end_idx:
+            wallet.derive_keys_range(base_path, start_idx, end_idx)
+        else:
+            print("✗ Invalid input")
+    except ValueError:
+        print("✗ Invalid indices provided")
+
+
 def main():
     """Main application loop"""
     wallet = HDWalletTool()
+
+    # Menu choice handlers
+    menu_handlers = {
+        MenuChoice.LOAD_FROM_MNEMONIC: handle_load_from_mnemonic,
+        MenuChoice.LOAD_FROM_XPRV: handle_load_from_xprv,
+        MenuChoice.GENERATE_NEW_WALLET: handle_generate_new_wallet,
+        MenuChoice.SHOW_MASTER_XPUB: handle_show_master_xpub,
+        MenuChoice.DERIVE_SINGLE_KEY: handle_derive_single_key,
+        MenuChoice.DERIVE_KEY_RANGE: handle_derive_key_range,
+    }
 
     while True:
         print_menu()
         choice = input("Enter your choice (1-7): ").strip()
 
-        if choice == "1":
-            print("\n--- Load from Mnemonic ---")
-            mnemonic = input("Enter mnemonic seed phrase: ").strip()
-            if mnemonic:
-                wallet.load_from_mnemonic(mnemonic)
-            else:
-                print("✗ Empty mnemonic provided")
+        # Convert string choice to enum
+        try:
+            menu_choice = MenuChoice(choice)
+        except ValueError:
+            print("✗ Invalid choice. Please try again.")
+            input("\nPress Enter to continue...")
+            continue
 
-        elif choice == "2":
-            print("\n--- Load from xprv ---")
-            xprv = input("Enter master private key (xprv): ").strip()
-            if xprv:
-                wallet.load_from_xprv(xprv)
-            else:
-                print("✗ Empty xprv provided")
-
-        elif choice == "3":
-            print("\n--- Generate New Wallet ---")
-            entropy = input("Enter entropy (hex, or press Enter for random): ").strip()
-            if not entropy:
-                entropy = None
-            wallet.generate_new_wallet(entropy)
-
-        elif choice == "4":
-            print("\n--- Master xpub ---")
-            wallet.get_master_xpub()
-
-        elif choice == "5":
-            print("\n--- Derive Single Key ---")
-            path = input("Enter derivation path (e.g., m/0/1234): ").strip()
-            if path:
-                wallet.derive_single_key(path)
-            else:
-                print("✗ Empty path provided")
-
-        elif choice == "6":
-            print("\n--- Derive Key Range ---")
-            base_path = input("Enter base path (e.g., m/44'/0'/0'): ").strip()
-            try:
-                start_idx = int(input("Enter start index: ").strip())
-                end_idx = int(input("Enter end index: ").strip())
-                if base_path and start_idx <= end_idx:
-                    wallet.derive_keys_range(base_path, start_idx, end_idx)
-                else:
-                    print("✗ Invalid input")
-            except ValueError:
-                print("✗ Invalid indices provided")
-
-        elif choice == "7":
+        if menu_choice == MenuChoice.EXIT:
             print("\nGoodbye!")
             break
 
-        else:
-            print("✗ Invalid choice. Please try again.")
+        # Execute the appropriate handler
+        if menu_choice in menu_handlers:
+            menu_handlers[menu_choice](wallet)
 
         input("\nPress Enter to continue...")
 
 
+def run_test_mode():
+    """Run the application in test mode"""
+    print("Running test mode...")
+
+    # Create test wallet
+    wallet = HDWalletTool()
+
+    # Test 1: Generate new wallet
+    print("\n=== Test 1: Generate New Wallet ===")
+    wallet.generate_new_wallet("cd9b819d9c62f0027116c1849e7d497f")
+
+    # Test 2: Get master xpub
+    print("\n=== Test 2: Master xpub ===")
+    wallet.get_master_xpub()
+
+    # Test 3: Derive single key
+    print("\n=== Test 3: Derive Single Key ===")
+    wallet.derive_single_key("m/0/1234")
+
+    # Test 4: Derive key range
+    print("\n=== Test 4: Derive Key Range ===")
+    wallet.derive_keys_range("m/44'/0'/0'", 0, 2)
+
+
 if __name__ == "__main__":
     # Example usage for testing
-    if len(sys.argv) > 1 and sys.argv[1] == "test":
-        print("Running test mode...")
-
-        # Create test wallet
-        wallet = HDWalletTool()
-
-        # Test 1: Generate new wallet
-        print("\n=== Test 1: Generate New Wallet ===")
-        wallet.generate_new_wallet("cd9b819d9c62f0027116c1849e7d497f")
-
-        # Test 2: Get master xpub
-        print("\n=== Test 2: Master xpub ===")
-        wallet.get_master_xpub()
-
-        # Test 3: Derive single key
-        print("\n=== Test 3: Derive Single Key ===")
-        wallet.derive_single_key("m/0/1234")
-
-        # Test 4: Derive key range
-        print("\n=== Test 4: Derive Key Range ===")
-        wallet.derive_keys_range("m/44'/0'/0'", 0, 2)
-
+    if len(sys.argv) > 1 and sys.argv[1] == TEST_MODE_ARG:
+        run_test_mode()
     else:
         main()
