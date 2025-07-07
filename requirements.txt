@@ -1,0 +1,14 @@
+# BSV HD Wallet Key Derivation Tool Dependencies
+
+# Main BSV library for HD wallet operations
+bsv-sdk>=1.0.0
+
+# Additional mnemonic support (fallback compatibility)
+mnemonic>=0.19
+
+# Note: The following are Python standard library modules and don't need to be installed:
+# - hashlib
+# - hmac
+# - sys
+# - os
+# - typing 
