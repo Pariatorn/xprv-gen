@@ -1,6 +1,6 @@
 # BSV HD Wallet Key Derivation Tool - Development Tools
 
-.PHONY: help install format lint check test clean all run-cli
+.PHONY: help install format lint check test test-cov clean all run-cli
 
 # Default target
 help:
@@ -9,10 +9,11 @@ help:
 	@echo "  format    - Format code with black and isort"
 	@echo "  lint      - Run all linters (flake8, pylint, mypy)"
 	@echo "  check     - Run format check without making changes"
-	@echo "  test      - Run the test mode"
+	@echo "  test      - Run unit tests with pytest"
+	@echo "  test-cov  - Run tests with coverage report"
 	@echo "  clean     - Clean up cache files"
 	@echo "  run-cli   - Run the CLI application"
-	@echo "  all       - Run format and lint"
+	@echo "  all       - Run format, lint, and test"
 
 # Install dependencies
 install:
@@ -41,15 +42,23 @@ lint:
 	@echo "🔎 Running flake8..."
 	./venv/bin/flake8 . --exclude=venv
 	@echo "🔍 Running pylint..."
-	./venv/bin/pylint *.py --ignore=venv
+	./venv/bin/pylint xprv_gen main.py --ignore=venv
 	@echo "🎯 Running mypy..."
-	./venv/bin/mypy . --exclude venv
+	./venv/bin/mypy xprv_gen main.py --exclude venv
 	@echo "✅ Linting complete!"
 
-# Run tests
+# Run unit tests
 test:
-	@echo "🧪 Running test mode..."
-	./venv/bin/python xprv-gen.py test
+	@echo "🧪 Running unit tests..."
+	./venv/bin/pytest tests/ -v
+	@echo "✅ Tests complete!"
+
+# Run tests with coverage
+test-cov:
+	@echo "🧪 Running tests with coverage..."
+	./venv/bin/pytest tests/ -v --cov=xprv_gen --cov-report=term-missing --cov-report=html
+	@echo "📊 Coverage report generated in htmlcov/"
+	@echo "✅ Tests with coverage complete!"
 
 # Clean cache files
 clean:
@@ -58,13 +67,20 @@ clean:
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	rm -rf htmlcov/ 2>/dev/null || true
+	rm -rf .coverage 2>/dev/null || true
 	@echo "✅ Cleanup complete!"
 
 # Run everything
-all: format lint
+all: format lint test
 	@echo "🎉 All checks passed!"
 
 # Run the CLI application
 run-cli:
 	@echo "🚀 Running BSV HD Wallet Key Derivation Tool..."
-	./venv/bin/python xprv-gen.py 
+	./venv/bin/python main.py
+
+# Run the legacy test mode (for backwards compatibility)
+run-test-mode:
+	@echo "🧪 Running legacy test mode..."
+	./venv/bin/python main.py test 

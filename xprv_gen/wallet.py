@@ -1,67 +1,36 @@
-#!/usr/bin/env python3
 """
-BSV HD Wallet Key Derivation Tool
-=================================
+Core wallet functionality for the BSV HD Wallet Key Derivation Tool.
 
-This tool allows for offline derivation of Bitcoin SV wallet keys from either:
-1. Seed phrase (mnemonic)
-2. Master private key (xprv)
-
-Features:
-- Derive xpub from seed phrase or xprv
-- Generate child private keys and addresses for given derivation paths
-- Support for standard BIP32 derivation paths
-- Compatible with ElectrumSV wallet
-- Completely offline operation
-
-Requirements:
-- pip install bsv-sdk
-
-Usage:
-    python hd_wallet_tool.py
+This module contains the HDWalletTool class which provides all the core
+wallet operations including loading from mnemonic/xprv, key derivation,
+and address generation.
 """
 
-import sys
-from enum import Enum
+import hashlib
+import hmac
 from typing import List, Optional, Tuple
 
 import bsv.hd
 
-# Constants
-SEED_LENGTH_64 = 64
-SEED_LENGTH_32 = 32
-HARDENED_KEY_FLAG = 0x80000000
-DERIVATION_PATH_PREFIX = "m"
-PBKDF2_ITERATIONS = 2048
-ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-
-
-# Menu options
-class MenuChoice(Enum):
-    """Menu choice enumeration"""
-
-    LOAD_FROM_MNEMONIC = "1"
-    LOAD_FROM_XPRV = "2"
-    GENERATE_NEW_WALLET = "3"
-    SHOW_MASTER_XPUB = "4"
-    DERIVE_SINGLE_KEY = "5"
-    DERIVE_KEY_RANGE = "6"
-    EXIT = "7"
-
-
-# Test mode identifier
-TEST_MODE_ARG = "test"
+from .constants import (
+    ALPHABET,
+    DERIVATION_PATH_PREFIX,
+    HARDENED_KEY_FLAG,
+    PBKDF2_ITERATIONS,
+    SEED_LENGTH_32,
+    SEED_LENGTH_64,
+)
 
 
 class HDWalletTool:
-    """HD Wallet derivation tool for BSV"""
+    """HD Wallet derivation tool for BSV."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.master_xprv: Optional[bsv.hd.Xprv] = None
         self.mnemonic: Optional[str] = None
 
     def load_from_mnemonic(self, mnemonic: str) -> bool:
-        """Load wallet from mnemonic seed phrase"""
+        """Load wallet from mnemonic seed phrase."""
         try:
             # First check if it's a valid BIP39 mnemonic
             try:
@@ -73,9 +42,6 @@ class HDWalletTool:
                 print("⚠ Not a valid BIP39 mnemonic, checking Electrum format...")
 
                 # Check if it's a valid Electrum mnemonic
-                import hashlib
-                import hmac
-
                 # Normalize the mnemonic (basic normalization)
                 normalized_mnemonic = " ".join(mnemonic.strip().split())
 
@@ -89,8 +55,6 @@ class HDWalletTool:
                     print("✓ Valid Electrum mnemonic")
 
                     # Generate seed using Electrum method: PBKDF2 with "electrum" salt
-                    import hashlib
-
                     seed = hashlib.pbkdf2_hmac(
                         "sha512",
                         normalized_mnemonic.encode("utf-8"),
@@ -122,7 +86,7 @@ class HDWalletTool:
             return False
 
     def load_from_xprv(self, xprv_string: str) -> bool:
-        """Load wallet from master private key (xprv)"""
+        """Load wallet from master private key (xprv)."""
         try:
             # Try to parse as extended private key string
             if xprv_string.startswith("xprv"):
@@ -157,7 +121,7 @@ class HDWalletTool:
             return False
 
     def _base58_decode(self, s: str) -> bytes:
-        """Decode base58 string"""
+        """Decode base58 string."""
         num = 0
         for char in s:
             num = num * 58 + ALPHABET.index(char)
@@ -169,7 +133,7 @@ class HDWalletTool:
         return bytes.fromhex(hex_str)
 
     def get_master_xpub(self) -> Optional[str]:
-        """Get master extended public key"""
+        """Get master extended public key."""
         if not self.master_xprv:
             print("✗ No wallet loaded")
             return None
@@ -184,8 +148,10 @@ class HDWalletTool:
 
     def derive_single_key(self, derivation_path: str) -> Optional[Tuple[str, str, str]]:
         """
-        Derive a single key from derivation path
-        Returns (private_key_wif, public_key_hex, address)
+        Derive a single key from derivation path.
+
+        Returns:
+            Tuple of (private_key_wif, public_key_hex, address) or None if error
         """
         if not self.master_xprv:
             print("✗ No wallet loaded")
@@ -234,8 +200,10 @@ class HDWalletTool:
         self, base_path: str, start_index: int, end_index: int
     ) -> List[Tuple[str, str, str, str]]:
         """
-        Derive a range of keys from base path
-        Returns list of (derivation_path, private_key_wif, public_key_hex, address)
+        Derive a range of keys from base path.
+
+        Returns:
+            List of (derivation_path, private_key_wif, public_key_hex, address)
         """
         if not self.master_xprv:
             print("✗ No wallet loaded")
@@ -317,7 +285,7 @@ class HDWalletTool:
             return []
 
     def generate_new_wallet(self, entropy: Optional[str] = None) -> bool:
-        """Generate a new wallet from entropy"""
+        """Generate a new wallet from entropy."""
         try:
             # Generate mnemonic from entropy
             mnemonic = bsv.hd.mnemonic_from_entropy(entropy)
@@ -332,146 +300,3 @@ class HDWalletTool:
         except Exception as e:
             print(f"✗ Error generating new wallet: {e}")
             return False
-
-
-def print_menu():
-    """Print the main menu"""
-    print("\n" + "=" * 60)
-    print("BSV HD Wallet Key Derivation Tool")
-    print("=" * 60)
-    print("1. Load wallet from mnemonic seed phrase")
-    print("2. Load wallet from master private key (xprv)")
-    print("3. Generate new wallet")
-    print("4. Show master xpub")
-    print("5. Derive single key from path (e.g., m/0/1234)")
-    print("6. Derive key range (e.g., m/44'/0'/0' indices 0-10)")
-    print("7. Exit")
-    print("=" * 60)
-
-
-def handle_load_from_mnemonic(wallet: HDWalletTool) -> None:
-    """Handle loading wallet from mnemonic"""
-    print("\n--- Load from Mnemonic ---")
-    mnemonic = input("Enter mnemonic seed phrase: ").strip()
-    if mnemonic:
-        wallet.load_from_mnemonic(mnemonic)
-    else:
-        print("✗ Empty mnemonic provided")
-
-
-def handle_load_from_xprv(wallet: HDWalletTool) -> None:
-    """Handle loading wallet from xprv"""
-    print("\n--- Load from xprv ---")
-    xprv = input("Enter master private key (xprv): ").strip()
-    if xprv:
-        wallet.load_from_xprv(xprv)
-    else:
-        print("✗ Empty xprv provided")
-
-
-def handle_generate_new_wallet(wallet: HDWalletTool) -> None:
-    """Handle generating new wallet"""
-    print("\n--- Generate New Wallet ---")
-    entropy_input = input("Enter entropy (hex, or press Enter for random): ").strip()
-    entropy: Optional[str] = entropy_input if entropy_input else None
-    wallet.generate_new_wallet(entropy)
-
-
-def handle_show_master_xpub(wallet: HDWalletTool) -> None:
-    """Handle showing master xpub"""
-    print("\n--- Master xpub ---")
-    wallet.get_master_xpub()
-
-
-def handle_derive_single_key(wallet: HDWalletTool) -> None:
-    """Handle deriving single key"""
-    print("\n--- Derive Single Key ---")
-    path = input("Enter derivation path (e.g., m/0/1234): ").strip()
-    if path:
-        wallet.derive_single_key(path)
-    else:
-        print("✗ Empty path provided")
-
-
-def handle_derive_key_range(wallet: HDWalletTool) -> None:
-    """Handle deriving key range"""
-    print("\n--- Derive Key Range ---")
-    base_path = input("Enter base path (e.g., m/44'/0'/0'): ").strip()
-    try:
-        start_idx = int(input("Enter start index: ").strip())
-        end_idx = int(input("Enter end index: ").strip())
-        if base_path and start_idx <= end_idx:
-            wallet.derive_keys_range(base_path, start_idx, end_idx)
-        else:
-            print("✗ Invalid input")
-    except ValueError:
-        print("✗ Invalid indices provided")
-
-
-def main():
-    """Main application loop"""
-    wallet = HDWalletTool()
-
-    # Menu choice handlers
-    menu_handlers = {
-        MenuChoice.LOAD_FROM_MNEMONIC: handle_load_from_mnemonic,
-        MenuChoice.LOAD_FROM_XPRV: handle_load_from_xprv,
-        MenuChoice.GENERATE_NEW_WALLET: handle_generate_new_wallet,
-        MenuChoice.SHOW_MASTER_XPUB: handle_show_master_xpub,
-        MenuChoice.DERIVE_SINGLE_KEY: handle_derive_single_key,
-        MenuChoice.DERIVE_KEY_RANGE: handle_derive_key_range,
-    }
-
-    while True:
-        print_menu()
-        choice = input("Enter your choice (1-7): ").strip()
-
-        # Convert string choice to enum
-        try:
-            menu_choice = MenuChoice(choice)
-        except ValueError:
-            print("✗ Invalid choice. Please try again.")
-            input("\nPress Enter to continue...")
-            continue
-
-        if menu_choice == MenuChoice.EXIT:
-            print("\nGoodbye!")
-            break
-
-        # Execute the appropriate handler
-        if menu_choice in menu_handlers:
-            menu_handlers[menu_choice](wallet)
-
-        input("\nPress Enter to continue...")
-
-
-def run_test_mode():
-    """Run the application in test mode"""
-    print("Running test mode...")
-
-    # Create test wallet
-    wallet = HDWalletTool()
-
-    # Test 1: Generate new wallet
-    print("\n=== Test 1: Generate New Wallet ===")
-    wallet.generate_new_wallet("cd9b819d9c62f0027116c1849e7d497f")
-
-    # Test 2: Get master xpub
-    print("\n=== Test 2: Master xpub ===")
-    wallet.get_master_xpub()
-
-    # Test 3: Derive single key
-    print("\n=== Test 3: Derive Single Key ===")
-    wallet.derive_single_key("m/0/1234")
-
-    # Test 4: Derive key range
-    print("\n=== Test 4: Derive Key Range ===")
-    wallet.derive_keys_range("m/44'/0'/0'", 0, 2)
-
-
-if __name__ == "__main__":
-    # Example usage for testing
-    if len(sys.argv) > 1 and sys.argv[1] == TEST_MODE_ARG:
-        run_test_mode()
-    else:
-        main()
