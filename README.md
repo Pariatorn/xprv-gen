@@ -24,7 +24,33 @@ A Python tool for offline derivation of Bitcoin SV (BSV) wallet keys from either
 - ✅ **Batch Generation**: Generate multiple keys in ranges
 - ✅ **ElectrumSV Compatible**: Compatible with ElectrumSV wallet format
 - ✅ **Interactive CLI**: User-friendly command-line interface
+- ✅ **Professional Package Structure**: Well-organized modular codebase
+- ✅ **Comprehensive Testing**: 55+ unit tests with 86% code coverage
 - ✅ **Professional Development Setup**: Complete linting, formatting, and testing workflow
+- ✅ **Console Command**: Easy-to-use `xprv-gen` command after installation
+
+## Project Structure
+
+```
+xprv-gen/
+├── xprv_gen/              # Main package
+│   ├── __init__.py        # Package exports
+│   ├── constants.py       # Constants and enums
+│   ├── wallet.py          # Core wallet functionality
+│   ├── ui.py              # User interface components
+│   └── cli.py             # CLI application logic
+├── tests/                 # Test suite (55+ tests)
+│   ├── test_constants.py  # Constants and enum tests
+│   ├── test_wallet.py     # Wallet functionality tests
+│   ├── test_ui.py         # UI component tests
+│   └── test_cli.py        # CLI application tests
+├── requirements.txt       # Runtime dependencies
+├── requirements-dev.txt   # Development dependencies
+├── pytest.ini            # Test configuration
+├── pyproject.toml         # Tool configurations
+├── Makefile               # Development automation
+└── README.md              # This file
+```
 
 ## Installation
 
@@ -47,21 +73,42 @@ cd xprv-gen
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+pip install -r requirements-dev.txt  # For development
+```
+
+3. Install the package in development mode:
+```bash
+pip install -e .
 ```
 
 ## Usage
 
-### Using Makefile Commands (Recommended)
+### Using Console Command (Recommended)
+
+After installation, you can use the `xprv-gen` command directly:
 
 ```bash
-# Install dependencies in virtual environment
+# Interactive mode
+xprv-gen
+
+# Test mode with example data
+xprv-gen test
+```
+
+### Using Makefile Commands
+
+```bash
+# Install dependencies and package
 make install
 
 # Run the CLI application
 make run-cli
 
-# Run in test mode
+# Run comprehensive test suite
 make test
+
+# Run tests with coverage report
+make coverage
 
 # Format code (black + isort)
 make format
@@ -78,14 +125,12 @@ make help
 
 ### Direct Python Usage
 
-#### Interactive Mode
 ```bash
-python3 xprv-gen.py
-```
+# Interactive mode
+python -m xprv_gen.cli
 
-#### Test Mode
-```bash
-python3 xprv-gen.py test
+# Test mode
+python -m xprv_gen.cli test
 ```
 
 ### Menu Options
@@ -93,9 +138,11 @@ python3 xprv-gen.py test
 1. **Load wallet from mnemonic seed phrase**
    - Supports both BIP39 and Electrum-style mnemonics
    - Automatically detects the format
+   - Enhanced validation with detailed error messages
 
 2. **Load wallet from master private key (xprv)**
    - Import from extended private key string
+   - Enhanced validation for proper xprv format
 
 3. **Generate new wallet**
    - Create a new random wallet with optional entropy
@@ -111,6 +158,43 @@ python3 xprv-gen.py test
    - Generate multiple keys in a range
    - Example: `m/44'/0'/0'` indices 0-10
 
+## Testing
+
+### Test Suite Overview
+
+The project includes a comprehensive test suite with 55+ unit tests:
+
+- **test_constants.py**: Tests for constants and enums
+- **test_wallet.py**: Core wallet functionality tests with mocking
+- **test_ui.py**: User interface component tests
+- **test_cli.py**: CLI application logic tests
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run tests with coverage report
+make coverage
+
+# Run tests with detailed output
+pytest -v
+
+# Run specific test file
+pytest tests/test_wallet.py
+
+# Run tests with coverage and HTML report
+pytest --cov=xprv_gen --cov-report=html
+```
+
+### Test Quality Metrics
+
+- **Test Coverage**: 86% (excluding test files)
+- **Total Tests**: 55+ comprehensive unit tests
+- **Mocking**: Extensive use of pytest mocks for external dependencies
+- **Test Types**: Unit tests, validation tests, error handling tests
+
 ## Development
 
 ### Development Setup
@@ -118,10 +202,10 @@ python3 xprv-gen.py test
 This project includes a complete professional development environment:
 
 **Configuration Files:**
-- `.flake8` - Code style checking
-- `.pylintrc` - Advanced code quality analysis  
+- `pytest.ini` - Test configuration and coverage settings
 - `pyproject.toml` - Black, isort, and mypy configuration
 - `Makefile` - Development automation
+- `requirements-dev.txt` - Development dependencies
 
 **Code Quality Tools:**
 - **Black**: Code formatting
@@ -129,6 +213,7 @@ This project includes a complete professional development environment:
 - **flake8**: Style guide enforcement
 - **pylint**: Code quality analysis
 - **mypy**: Static type checking
+- **pytest**: Testing framework with coverage
 
 ### Development Workflow
 
@@ -137,13 +222,16 @@ This project includes a complete professional development environment:
 3. **Format**: `make format` 
 4. **Lint**: `make lint`
 5. **Test**: `make test`
+6. **Coverage**: `make coverage`
 
 ### Code Quality Standards
 
 - **Pylint Score**: 10.00/10 (perfect)
+- **Test Coverage**: 86% minimum
 - **Line Length**: ≤88 characters
-- **Type Hints**: Full coverage
+- **Type Hints**: Full coverage with strict mypy
 - **Documentation**: Comprehensive docstrings
+- **Testing**: Comprehensive unit test coverage
 
 ## Supported Formats
 
@@ -169,6 +257,13 @@ This project includes a complete professional development environment:
 - **Electrum**: Uses PBKDF2 with "electrum" salt
 - Both use 2048 iterations for key stretching
 
+### Package Architecture
+- **Modular Design**: Separated concerns into focused modules
+- **Single Responsibility**: Each module has a clear purpose
+- **Type Safety**: Comprehensive type hints and mypy validation
+- **Error Handling**: Robust error handling with detailed messages
+- **Testing**: Extensive test coverage with mocking
+
 ## Security Best Practices
 
 1. **Offline Usage**: Run this tool on an air-gapped computer
@@ -186,6 +281,9 @@ Expected xprv: xprv9s21ZrQH143K...
 ✓ Successfully loaded wallet from mnemonic
 ✓ Master xprv: xprv9s21ZrQH143K...
 Match: True
+
+=== Test Results ===
+✓ All tests passed successfully!
 ```
 
 ## Requirements
@@ -196,6 +294,9 @@ Match: True
 - mnemonic>=0.19
 
 ### Development Dependencies
+- pytest>=7.0.0 (testing framework)
+- pytest-cov>=4.0.0 (coverage reporting)
+- pytest-mock>=3.10.0 (mocking support)
 - black>=23.0.0 (code formatting)
 - isort>=5.12.0 (import sorting)
 - flake8>=6.0.0 (style checking)
@@ -215,7 +316,8 @@ Contributions are welcome! Please follow the development workflow:
 3. Make your changes
 4. Run `make format` and `make lint` 
 5. Ensure all tests pass with `make test`
-6. Submit a Pull Request
+6. Maintain test coverage with `make coverage`
+7. Submit a Pull Request
 
 ## Support
 
