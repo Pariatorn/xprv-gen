@@ -89,27 +89,33 @@ class HDWalletTool:
         """Load wallet from master private key (xprv)."""
         try:
             # Try to parse as extended private key string
-            if xprv_string.startswith("xprv"):
-                # Parse as proper xprv string
+            if xprv_string.startswith("xprv") and len(xprv_string) == 111:
+                # Validate and parse as proper xprv string
                 self.master_xprv = bsv.hd.Xprv(xprv_string)
             elif len(xprv_string) == SEED_LENGTH_64:
-                # Assume it's a hex private key and create from that
-                seed = bytes.fromhex(xprv_string)
-                # Pad to proper seed length if needed
-                if len(seed) < SEED_LENGTH_64:
-                    seed = seed + b"\x00" * (SEED_LENGTH_64 - len(seed))
-                self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
+                # Validate it's a proper hex string
+                try:
+                    seed = bytes.fromhex(xprv_string)
+                    if len(seed) != SEED_LENGTH_32:
+                        raise ValueError(f"Invalid seed length: {len(seed)} bytes, expected {SEED_LENGTH_32}")
+                    # Extend to 64 bytes for master seed generation
+                    seed = seed + seed  # Double the 32-byte seed to 64 bytes
+                    self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
+                except ValueError as hex_error:
+                    raise ValueError(f"Invalid hex private key: {hex_error}")
             else:
                 # Try to decode as base58 and extract key
                 decoded = self._base58_decode(xprv_string)
                 if len(decoded) >= SEED_LENGTH_32:
                     # Extract the private key (skip version and checksum)
                     private_key_bytes = decoded[1:33]
-                    # Pad to 64 bytes for seed
-                    seed = private_key_bytes + b"\x00" * SEED_LENGTH_32
+                    if len(private_key_bytes) != SEED_LENGTH_32:
+                        raise ValueError(f"Invalid private key length: {len(private_key_bytes)} bytes")
+                    # Extend to 64 bytes for master seed generation  
+                    seed = private_key_bytes + private_key_bytes
                     self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
                 else:
-                    raise ValueError("Invalid xprv format")
+                    raise ValueError("Invalid xprv format: insufficient data length")
 
             self.mnemonic = None
             print("✓ Successfully loaded wallet from xprv")

@@ -49,19 +49,32 @@ def run_test_mode() -> None:
 
     # Test 1: Generate new wallet
     print("\n=== Test 1: Generate New Wallet ===")
-    wallet.generate_new_wallet("cd9b819d9c62f0027116c1849e7d497f")
+    result1 = wallet.generate_new_wallet("cd9b819d9c62f0027116c1849e7d497f")
+    print(f"Result: {'✅ SUCCESS' if result1 else '❌ FAILED'}")
 
     # Test 2: Get master xpub
     print("\n=== Test 2: Master xpub ===")
-    wallet.get_master_xpub()
+    xpub_result = wallet.get_master_xpub()
+    print(f"Result: {'✅ SUCCESS' if xpub_result else '❌ FAILED'}")
+    if xpub_result:
+        print(f"Returned xpub length: {len(xpub_result)} characters")
 
     # Test 3: Derive single key
     print("\n=== Test 3: Derive Single Key ===")
-    wallet.derive_single_key("m/0/1234")
+    single_key_result = wallet.derive_single_key("m/0/1234")
+    print(f"Result: {'✅ SUCCESS' if single_key_result else '❌ FAILED'}")
+    if single_key_result:
+        wif, pubkey, address = single_key_result
+        print(f"Returned: WIF({len(wif)} chars), PubKey({len(pubkey)} chars), Address({len(address)} chars)")
 
     # Test 4: Derive key range
     print("\n=== Test 4: Derive Key Range ===")
-    wallet.derive_keys_range("m/44'/0'/0'", 0, 2)
+    range_result = wallet.derive_keys_range("m/44'/0'/0'", 0, 2)
+    print(f"Result: {'✅ SUCCESS' if range_result else '❌ FAILED'}")
+    if range_result:
+        print(f"Returned {len(range_result)} derived keys")
+        
+    print(f"\n🎯 Test Summary: {sum([bool(result1), bool(xpub_result), bool(single_key_result), bool(range_result)])}/4 tests passed")
 
 
 def cli_main() -> None:

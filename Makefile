@@ -21,6 +21,8 @@ install:
 	python3 -m venv venv
 	./venv/bin/pip install --upgrade pip
 	./venv/bin/pip install -r requirements.txt
+	./venv/bin/pip install -r requirements-dev.txt
+	./venv/bin/pip install -e .
 	@echo "✅ Installation complete! Use 'make run-cli' to start the application"
 
 # Format code
@@ -42,9 +44,9 @@ lint:
 	@echo "🔎 Running flake8..."
 	./venv/bin/flake8 . --exclude=venv
 	@echo "🔍 Running pylint..."
-	./venv/bin/pylint xprv_gen main.py --ignore=venv
+	./venv/bin/pylint xprv_gen tests --ignore=venv
 	@echo "🎯 Running mypy..."
-	./venv/bin/mypy xprv_gen main.py --exclude venv
+	./venv/bin/mypy xprv_gen tests --exclude venv
 	@echo "✅ Linting complete!"
 
 # Run unit tests
@@ -78,9 +80,9 @@ all: format lint test
 # Run the CLI application
 run-cli:
 	@echo "🚀 Running BSV HD Wallet Key Derivation Tool..."
-	./venv/bin/python main.py
+	./venv/bin/python -m xprv_gen.cli
 
 # Run the legacy test mode (for backwards compatibility)
 run-test-mode:
 	@echo "🧪 Running legacy test mode..."
-	./venv/bin/python main.py test 
+	./venv/bin/python -m xprv_gen.cli test 

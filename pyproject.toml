@@ -1,3 +1,21 @@
+[project]
+name = "xprv-gen"
+version = "1.0.0"
+license = {text = "MIT"}
+description = "BSV HD Wallet Key Derivation Tool"
+authors = [
+    {name = "BSV HD Wallet Tool"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bsv-sdk>=1.0.0",
+    "mnemonic>=0.19",
+]
+
+[project.scripts]
+xprv-gen = "xprv_gen.cli:cli_main"
+
 [tool.black]
 line-length = 88
 target-version = ['py313']
