@@ -7,8 +7,6 @@ and address generation.
 """
 
 import base64
-import csv
-import getpass
 import hashlib
 import hmac
 import json
@@ -25,15 +23,34 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .constants import (
     ALPHABET,
-    CSV_EXTENSION,
     DEFAULT_SAVE_FILENAME,
     DERIVATION_PATH_PREFIX,
     DETAILED_CSV_HEADER,
+    EXPORT_FORMAT_CSV_DETAILED,
+    EXPORT_FORMAT_CSV_SIMPLE,
+    EXPORT_FORMAT_DETAILED_CSV,
+    EXPORT_FORMAT_JSON,
+    EXPORT_FORMAT_SIMPLE_CSV,
     HARDENED_KEY_FLAG,
     PBKDF2_ITERATIONS,
     SEED_LENGTH_32,
     SEED_LENGTH_64,
     SIMPLE_CSV_HEADER,
+    XPRV_PREFIX,
+    XPRV_STRING_LENGTH,
+)
+from .exceptions import (
+    DecryptionError,
+    DerivationPathError,
+    EncryptionError,
+    FileOperationError,
+    InvalidEntropyError,
+    InvalidIndexRangeError,
+    InvalidMnemonicError,
+    InvalidPasswordError,
+    InvalidXprvError,
+    NoKeysAvailableError,
+    WalletNotLoadedError,
 )
 
 
@@ -43,114 +60,164 @@ class HDWalletTool:
     def __init__(self) -> None:
         self.master_xprv: Optional[bsv.hd.Xprv] = None
         self.mnemonic: Optional[str] = None
-        self.last_derived_keys: List[Tuple[str, str, str, str]] = []
 
     @property
     def is_wallet_loaded(self) -> bool:
         """Check if wallet is loaded."""
         return self.master_xprv is not None
 
-    @property
-    def has_derived_keys(self) -> bool:
-        """Check if keys have been derived."""
-        return len(self.last_derived_keys) > 0
+    def _load_from_bip39_mnemonic(self, mnemonic: str) -> bytes:
+        """Load seed from BIP39 mnemonic."""
+        bsv.hd.validate_mnemonic(mnemonic)
+        return bsv.hd.seed_from_mnemonic(mnemonic)
 
-    def load_from_mnemonic(self, mnemonic: str) -> bool:
-        """Load wallet from mnemonic seed phrase."""
+    def _load_from_electrum_mnemonic(self, mnemonic: str) -> bytes:
+        """Load seed from Electrum mnemonic."""
+        # Normalize the mnemonic (basic normalization)
+        normalized_mnemonic = " ".join(mnemonic.strip().split())
+
+        # Electrum validation: HMAC-SHA512 with "Seed version" as key
+        h = hmac.new(
+            b"Seed version", normalized_mnemonic.encode("utf-8"), hashlib.sha512
+        ).digest()
+
+        # Check if first byte is 0x01 (Electrum standard seed)
+        if h[0] != 0x01:
+            raise InvalidMnemonicError("Not a valid Electrum mnemonic")
+
+        # Generate seed using Electrum method: PBKDF2 with "electrum" salt
+        return hashlib.pbkdf2_hmac(
+            "sha512",
+            normalized_mnemonic.encode("utf-8"),
+            b"electrum",  # Electrum uses "electrum" salt vs "mnemonic"
+            PBKDF2_ITERATIONS,  # Same iteration count as BIP39
+        )
+
+    def load_from_mnemonic(self, mnemonic: str) -> str:
+        """Load wallet from mnemonic seed phrase.
+
+        Returns:
+            The mnemonic type that was successfully loaded (BIP39 or Electrum)
+        """
+        if not mnemonic or not mnemonic.strip():
+            raise InvalidMnemonicError("Empty mnemonic provided")
+
         try:
-            # First check if it's a valid BIP39 mnemonic
+            # First try BIP39 mnemonic
             try:
-                bsv.hd.validate_mnemonic(mnemonic)
-                print("✓ Valid BIP39 mnemonic")
-                # Use BSV library for BIP39
-                seed = bsv.hd.seed_from_mnemonic(mnemonic)
+                seed = self._load_from_bip39_mnemonic(mnemonic)
+                mnemonic_type = "BIP39"
             except Exception:
-                print("⚠ Not a valid BIP39 mnemonic, checking Electrum format...")
-
-                # Check if it's a valid Electrum mnemonic
-                # Normalize the mnemonic (basic normalization)
-                normalized_mnemonic = " ".join(mnemonic.strip().split())
-
-                # Electrum validation: HMAC-SHA512 with "Seed version" as key
-                h = hmac.new(
-                    b"Seed version", normalized_mnemonic.encode("utf-8"), hashlib.sha512
-                ).digest()
-
-                # Check if first byte is 0x01 (Electrum standard seed)
-                if h[0] == 0x01:
-                    print("✓ Valid Electrum mnemonic")
-
-                    # Generate seed using Electrum method: PBKDF2 with "electrum" salt
-                    seed = hashlib.pbkdf2_hmac(
-                        "sha512",
-                        normalized_mnemonic.encode("utf-8"),
-                        b"electrum",  # Electrum uses "electrum" salt vs "mnemonic"
-                        PBKDF2_ITERATIONS,  # Same iteration count as BIP39
-                    )
-                else:
-                    print(
-                        "⚠ Not a valid Electrum mnemonic either, but trying anyway..."
-                    )
-                    # Still try to generate seed (for compatibility)
+                # Try Electrum mnemonic
+                try:
+                    seed = self._load_from_electrum_mnemonic(mnemonic)
+                    mnemonic_type = "Electrum"
+                except Exception:
+                    # Fall back to generic seed generation for compatibility
+                    normalized_mnemonic = " ".join(mnemonic.strip().split())
                     seed = hashlib.pbkdf2_hmac(
                         "sha512",
                         normalized_mnemonic.encode("utf-8"),
                         b"electrum",
                         PBKDF2_ITERATIONS,
                     )
+                    mnemonic_type = "Generic"
 
             # Create master xprv from seed
             self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
             self.mnemonic = mnemonic
 
-            print("✓ Successfully loaded wallet from mnemonic")
-            print(f"✓ Master xprv: {self.master_xprv}")
-            return True
+            return mnemonic_type
 
         except Exception as e:
-            print(f"✗ Error loading from mnemonic: {e}")
-            return False
+            raise InvalidMnemonicError(f"Error loading from mnemonic: {e}") from e
 
-    def load_from_xprv(self, xprv_string: str) -> bool:
-        """Load wallet from master private key (xprv)."""
+    def _load_from_xprv_string(self, xprv_string: str) -> None:
+        """Load from proper xprv string format."""
+        if not (
+            xprv_string.startswith(XPRV_PREFIX)
+            and len(xprv_string) == XPRV_STRING_LENGTH
+        ):
+            raise InvalidXprvError(
+                f"Invalid xprv format: must start with '{XPRV_PREFIX}' "
+                f"and be {XPRV_STRING_LENGTH} characters"
+            )
+        self.master_xprv = bsv.hd.Xprv(xprv_string)
+
+    def _load_from_hex_seed(self, hex_string: str) -> None:
+        """Load from hex seed string."""
+        if len(hex_string) != SEED_LENGTH_64:
+            raise InvalidXprvError(
+                f"Invalid hex seed length: {len(hex_string)} characters, "
+                f"expected {SEED_LENGTH_64}"
+            )
+
+        try:
+            seed = bytes.fromhex(hex_string)
+            if len(seed) != SEED_LENGTH_32:
+                raise InvalidXprvError(
+                    f"Invalid seed length: {len(seed)} bytes, "
+                    f"expected {SEED_LENGTH_32}"
+                )
+            # Extend to 64 bytes for master seed generation
+            seed = seed + seed  # Double the 32-byte seed to 64 bytes
+            self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
+        except ValueError as hex_error:
+            raise InvalidXprvError(
+                f"Invalid hex private key: {hex_error}"
+            ) from hex_error
+
+    def _load_from_base58_key(self, base58_string: str) -> None:
+        """Load from base58 encoded private key."""
+        try:
+            decoded = self._base58_decode(base58_string)
+            if len(decoded) < SEED_LENGTH_32:
+                raise InvalidXprvError("Invalid xprv format: insufficient data length")
+
+            # Extract the private key (skip version and checksum)
+            private_key_bytes = decoded[1:33]
+            if len(private_key_bytes) != SEED_LENGTH_32:
+                raise InvalidXprvError(
+                    f"Invalid private key length: {len(private_key_bytes)} bytes"
+                )
+
+            # Extend to 64 bytes for master seed generation
+            seed = private_key_bytes + private_key_bytes
+            self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
+        except Exception as e:
+            raise InvalidXprvError(f"Error decoding base58 key: {e}") from e
+
+    def load_from_xprv(self, xprv_string: str) -> str:
+        """Load wallet from master private key (xprv).
+
+        Returns:
+            The format type that was successfully loaded
+        """
+        if not xprv_string or not xprv_string.strip():
+            raise InvalidXprvError("Empty xprv string provided")
+
+        xprv_string = xprv_string.strip()
+
         try:
             # Try to parse as extended private key string
-            if xprv_string.startswith("xprv") and len(xprv_string) == 111:
-                # Validate and parse as proper xprv string
-                self.master_xprv = bsv.hd.Xprv(xprv_string)
+            if (
+                xprv_string.startswith(XPRV_PREFIX)
+                and len(xprv_string) == XPRV_STRING_LENGTH
+            ):
+                self._load_from_xprv_string(xprv_string)
+                format_type = "Extended Private Key"
             elif len(xprv_string) == SEED_LENGTH_64:
-                # Validate it's a proper hex string
-                try:
-                    seed = bytes.fromhex(xprv_string)
-                    if len(seed) != SEED_LENGTH_32:
-                        raise ValueError(f"Invalid seed length: {len(seed)} bytes, expected {SEED_LENGTH_32}")
-                    # Extend to 64 bytes for master seed generation
-                    seed = seed + seed  # Double the 32-byte seed to 64 bytes
-                    self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
-                except ValueError as hex_error:
-                    raise ValueError(f"Invalid hex private key: {hex_error}")
+                self._load_from_hex_seed(xprv_string)
+                format_type = "Hex Seed"
             else:
-                # Try to decode as base58 and extract key
-                decoded = self._base58_decode(xprv_string)
-                if len(decoded) >= SEED_LENGTH_32:
-                    # Extract the private key (skip version and checksum)
-                    private_key_bytes = decoded[1:33]
-                    if len(private_key_bytes) != SEED_LENGTH_32:
-                        raise ValueError(f"Invalid private key length: {len(private_key_bytes)} bytes")
-                    # Extend to 64 bytes for master seed generation  
-                    seed = private_key_bytes + private_key_bytes
-                    self.master_xprv = bsv.hd.master_xprv_from_seed(seed)
-                else:
-                    raise ValueError("Invalid xprv format: insufficient data length")
+                self._load_from_base58_key(xprv_string)
+                format_type = "Base58 Key"
 
             self.mnemonic = None
-            print("✓ Successfully loaded wallet from xprv")
-            print(f"✓ Master xprv: {self.master_xprv}")
-            return True
+            return format_type
 
         except Exception as e:
-            print(f"✗ Error loading from xprv: {e}")
-            return False
+            raise InvalidXprvError(f"Error loading from xprv: {e}") from e
 
     def _base58_decode(self, s: str) -> bytes:
         """Decode base58 string."""
@@ -164,36 +231,32 @@ class HDWalletTool:
             hex_str = "0" + hex_str
         return bytes.fromhex(hex_str)
 
-    def get_master_xpub(self) -> Optional[str]:
+    def get_master_xpub(self) -> str:
         """Get master extended public key."""
         if not self.master_xprv:
-            print("✗ No wallet loaded")
-            return None
+            raise WalletNotLoadedError("No wallet loaded")
 
         try:
             xpub = self.master_xprv.xpub()
-            print(f"✓ Master xpub: {xpub}")
             return str(xpub)
         except Exception as e:
-            print(f"✗ Error getting xpub: {e}")
-            return None
+            raise WalletNotLoadedError(f"Error getting xpub: {e}") from e
 
-    def derive_single_key(self, derivation_path: str) -> Optional[Tuple[str, str, str]]:
+    def derive_single_key(self, derivation_path: str) -> Tuple[str, str, str, str]:
         """
         Derive a single key from derivation path.
 
         Returns:
-            Tuple of (private_key_wif, public_key_hex, address) or None if error
+            Tuple of (derivation_path, private_key_wif, public_key_hex, address)
         """
         if not self.master_xprv:
-            print("✗ No wallet loaded")
-            return None
+            raise WalletNotLoadedError("No wallet loaded")
 
         try:
             # Parse derivation path
             path_parts = derivation_path.strip().split("/")
             if path_parts[0] != DERIVATION_PATH_PREFIX:
-                raise ValueError(
+                raise DerivationPathError(
                     f"Derivation path must start with '{DERIVATION_PATH_PREFIX}'"
                 )
 
@@ -217,19 +280,84 @@ class HDWalletTool:
             public_key_hex = current_key.public_key().hex()
             address = current_key.address()
 
-            print(f"✓ Derived key for path: {derivation_path}")
-            print(f"  Private Key (WIF): {wif}")
-            print(f"  Public Key (hex): {public_key_hex}")
-            print(f"  Address: {address}")
+            return derivation_path, wif, public_key_hex, address
 
-            # Store the derived key for potential saving
-            self.last_derived_keys = [(derivation_path, wif, public_key_hex, address)]
-
-            return wif, public_key_hex, address
-
+        except ValueError as e:
+            raise DerivationPathError(
+                f"Invalid derivation path '{derivation_path}': {e}"
+            ) from e
         except Exception as e:
-            print(f"✗ Error deriving key for path {derivation_path}: {e}")
-            return None
+            raise DerivationPathError(
+                f"Error deriving key for path '{derivation_path}': {e}"
+            ) from e
+
+    def _validate_index_range(self, start_index: int, end_index: int) -> None:
+        """Validate index range parameters."""
+        if start_index < 0 or end_index < 0 or start_index > end_index:
+            raise InvalidIndexRangeError(
+                f"Invalid index range: start={start_index}, end={end_index}"
+            )
+
+    def _derive_range_from_mnemonic(
+        self, base_path: str, start_index: int, end_index: int
+    ) -> List[Tuple[str, str, str, str]]:
+        """Derive key range using mnemonic with SDK optimization."""
+        keys = bsv.hd.derive_xprvs_from_mnemonic(
+            self.mnemonic,
+            path=base_path,
+            change=0,  # Using 0 for external chain
+            index_start=start_index,
+            index_end=end_index,
+        )
+
+        results = []
+        for i, key in enumerate(keys):
+            current_index = start_index + i
+            full_path = f"{base_path}/0/{current_index}"
+
+            wif = key.private_key().wif()
+            public_key_hex = key.public_key().hex()
+            address = key.address()
+
+            results.append((full_path, wif, public_key_hex, address))
+
+        return results
+
+    def _derive_range_manually(
+        self, base_path: str, start_index: int, end_index: int
+    ) -> List[Tuple[str, str, str, str]]:
+        """Derive key range manually when no mnemonic is available."""
+        # Parse base path to get the key at that level
+        base_parts = base_path.strip().split("/")
+        if base_parts[0] != DERIVATION_PATH_PREFIX:
+            raise DerivationPathError(
+                f"Base path must start with '{DERIVATION_PATH_PREFIX}'"
+            )
+
+        # Derive to the base path
+        current_key = self.master_xprv
+        for part in base_parts[1:]:
+            if part.endswith("'") or part.endswith("h"):
+                index = int(part[:-1]) | HARDENED_KEY_FLAG
+            else:
+                index = int(part)
+            current_key = current_key.ckd(index)
+
+        # Now derive the range
+        results = []
+        for i in range(start_index, end_index + 1):
+            # Derive for external addresses (0) and then the index
+            external_key = current_key.ckd(0)  # Change index 0 = external
+            final_key = external_key.ckd(i)
+
+            full_path = f"{base_path}/0/{i}"
+            wif = final_key.private_key().wif()
+            public_key_hex = final_key.public_key().hex()
+            address = final_key.address()
+
+            results.append((full_path, wif, public_key_hex, address))
+
+        return results
 
     def derive_keys_range(
         self, base_path: str, start_index: int, end_index: int
@@ -241,325 +369,193 @@ class HDWalletTool:
             List of (derivation_path, private_key_wif, public_key_hex, address)
         """
         if not self.master_xprv:
-            print("✗ No wallet loaded")
-            return []
+            raise WalletNotLoadedError("No wallet loaded")
+
+        self._validate_index_range(start_index, end_index)
 
         try:
-            # Use the SDK's built-in range derivation if available
+            # Use optimized derivation if mnemonic is available
             if self.mnemonic:
-                # Use the optimized range derivation from mnemonic
-                keys = bsv.hd.derive_xprvs_from_mnemonic(
-                    self.mnemonic,
-                    path=base_path,
-                    change=0,  # Using 0 for external chain
-                    index_start=start_index,
-                    index_end=end_index,
+                return self._derive_range_from_mnemonic(
+                    base_path, start_index, end_index
                 )
 
-                results = []
-                for i, key in enumerate(keys):
-                    current_index = start_index + i
-                    full_path = f"{base_path}/0/{current_index}"
+            return self._derive_range_manually(base_path, start_index, end_index)
 
-                    wif = key.private_key().wif()
-                    public_key_hex = key.public_key().hex()
-                    address = key.address()
-
-                    results.append((full_path, wif, public_key_hex, address))
-
-                    print(f"✓ {full_path}")
-                    print(f"  Private Key (WIF): {wif}")
-                    print(f"  Public Key (hex): {public_key_hex}")
-                    print(f"  Address: {address}")
-                    print()
-
-                # Store the derived keys for potential saving
-                self.last_derived_keys = results
-
-                return results
-
-            # Manual derivation when no mnemonic is available
-            results = []
-
-            # Parse base path to get the key at that level
-            base_parts = base_path.strip().split("/")
-            if base_parts[0] != DERIVATION_PATH_PREFIX:
-                raise ValueError(
-                    f"Base path must start with '{DERIVATION_PATH_PREFIX}'"
-                )
-
-            # Derive to the base path
-            current_key = self.master_xprv
-            for part in base_parts[1:]:
-                if part.endswith("'") or part.endswith("h"):
-                    index = int(part[:-1]) | HARDENED_KEY_FLAG
-                else:
-                    index = int(part)
-                current_key = current_key.ckd(index)
-
-            # Now derive the range
-            for i in range(start_index, end_index + 1):
-                # Derive for external addresses (0) and then the index
-                external_key = current_key.ckd(0)  # Change index 0 = external
-                final_key = external_key.ckd(i)
-
-                full_path = f"{base_path}/0/{i}"
-                wif = final_key.private_key().wif()
-                public_key_hex = final_key.public_key().hex()
-                address = final_key.address()
-
-                results.append((full_path, wif, public_key_hex, address))
-
-                print(f"✓ {full_path}")
-                print(f"  Private Key (WIF): {wif}")
-                print(f"  Public Key (hex): {public_key_hex}")
-                print(f"  Address: {address}")
-                print()
-
-            # Store the derived keys for potential saving
-            self.last_derived_keys = results
-
-            return results
-
+        except ValueError as e:
+            raise DerivationPathError(f"Invalid base path '{base_path}': {e}") from e
         except Exception as e:
-            print(f"✗ Error deriving key range: {e}")
-            return []
+            raise DerivationPathError(f"Error deriving key range: {e}") from e
 
-    def generate_new_wallet(self, entropy: Optional[str] = None) -> bool:
-        """Generate a new wallet from entropy."""
+    def generate_new_wallet(self, entropy: Optional[str] = None) -> Tuple[str, str]:
+        """Generate a new wallet from entropy.
+
+        Returns:
+            Tuple of (mnemonic, entropy_used)
+        """
         try:
             # Generate mnemonic from entropy
             mnemonic = bsv.hd.mnemonic_from_entropy(entropy)
 
-            print("✓ Generated new wallet")
-            if entropy:
-                print(f"✓ Entropy: {entropy}")
-            print(f"✓ Mnemonic: {mnemonic}")
+            # Load the wallet from the generated mnemonic
+            self.load_from_mnemonic(mnemonic)
 
-            return self.load_from_mnemonic(mnemonic)
+            return mnemonic, entropy or "auto-generated"
 
         except Exception as e:
-            print(f"✗ Error generating new wallet: {e}")
-            return False
+            raise InvalidEntropyError(f"Error generating new wallet: {e}") from e
 
-    def generate_new_wallet_secure(self) -> bool:
-        """Generate a new wallet using cryptographically secure random entropy."""
+    def generate_new_wallet_secure(self) -> Tuple[str, str]:
+        """Generate a new wallet using cryptographically secure random entropy.
+
+        Returns:
+            Tuple of (mnemonic, entropy_hex)
+        """
         try:
             # Generate cryptographically secure random entropy (32 bytes = 256 bits)
             secure_entropy = secrets.token_bytes(32)
             entropy_hex = secure_entropy.hex()
 
-            print("✓ Using cryptographically secure random entropy")
-            print(f"✓ Entropy source: os.urandom() via secrets module")
-            print(f"✓ Entropy strength: 256 bits")
-
             # Generate mnemonic from secure entropy
             mnemonic = bsv.hd.mnemonic_from_entropy(entropy_hex)
 
-            print("✓ Generated new wallet with secure entropy")
-            print(f"✓ Entropy: {entropy_hex}")
-            print(f"✓ Mnemonic: {mnemonic}")
+            # Load the wallet from the generated mnemonic
+            self.load_from_mnemonic(mnemonic)
 
-            return self.load_from_mnemonic(mnemonic)
-
-        except Exception as e:
-            print(f"✗ Error generating secure wallet: {e}")
-            return False
-
-    def save_keys_simple_format(
-        self,
-        keys_data: List[Tuple[str, str, str, str]],
-        filename: Optional[str] = None,
-    ) -> bool:
-        """
-        Save keys in simple CSV format: address,key.
-
-        Args:
-            keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
-            filename: Optional filename (without extension)
-
-        Returns:
-            True if successful, False otherwise
-        """
-        if not keys_data:
-            print("✗ No keys data provided")
-            return False
-
-        try:
-            # Generate filename if not provided
-            if not filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{DEFAULT_SAVE_FILENAME}_simple_{timestamp}"
-
-            # Ensure CSV extension
-            if not filename.endswith(CSV_EXTENSION):
-                filename += CSV_EXTENSION
-
-            # Create Path object
-            file_path = Path(filename)
-
-            # Write CSV file
-            with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
-                writer = csv.writer(csvfile)
-                
-                # Write header
-                writer.writerow(SIMPLE_CSV_HEADER.split(","))
-                
-                # Write data rows: address, key (WIF format)
-                for _, wif, _, address in keys_data:
-                    writer.writerow([address, wif])
-
-            print(f"✓ Successfully saved {len(keys_data)} keys to {file_path}")
-            print(f"✓ Format: {SIMPLE_CSV_HEADER}")
-            return True
+            return mnemonic, entropy_hex
 
         except Exception as e:
-            print(f"✗ Error saving keys in simple format: {e}")
-            return False
+            raise InvalidEntropyError(f"Error generating secure wallet: {e}") from e
 
-    def save_keys_detailed_format(
-        self,
-        keys_data: List[Tuple[str, str, str, str]],
-        filename: Optional[str] = None,
-    ) -> bool:
-        """
-        Save keys in detailed CSV format: derivation,address,key.
+    def _generate_simple_csv_content(
+        self, keys_data: List[Tuple[str, str, str, str]]
+    ) -> str:
+        """Generate simple CSV content."""
+        content = f"{SIMPLE_CSV_HEADER}\n"
+        for _, wif, _, address in keys_data:
+            content += f"{address},{wif}\n"
+        return content
 
-        Args:
-            keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
-            filename: Optional filename (without extension)
+    def _generate_detailed_csv_content(
+        self, keys_data: List[Tuple[str, str, str, str]]
+    ) -> str:
+        """Generate detailed CSV content."""
+        content = f"{DETAILED_CSV_HEADER}\n"
+        for derivation_path, wif, _, address in keys_data:
+            content += f"{derivation_path},{address},{wif}\n"
+        return content
 
-        Returns:
-            True if successful, False otherwise
-        """
-        if not keys_data:
-            print("✗ No keys data provided")
-            return False
+    def _generate_json_content(self, keys_data: List[Tuple[str, str, str, str]]) -> str:
+        """Generate JSON content with metadata."""
+        export_data: Dict[str, Any] = {
+            "export_info": {
+                "timestamp": datetime.now().isoformat(),
+                "format_version": "1.0",
+                "total_keys": len(keys_data),
+                "wallet_type": "BSV",
+                "exported_by": "BSV HD Wallet Key Derivation Tool",
+            },
+            "keys": [],
+        }
 
-        try:
-            # Generate filename if not provided
-            if not filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{DEFAULT_SAVE_FILENAME}_detailed_{timestamp}"
-
-            # Ensure CSV extension
-            if not filename.endswith(CSV_EXTENSION):
-                filename += CSV_EXTENSION
-
-            # Create Path object
-            file_path = Path(filename)
-
-            # Write CSV file
-            with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
-                writer = csv.writer(csvfile)
-                
-                # Write header
-                writer.writerow(DETAILED_CSV_HEADER.split(","))
-                
-                # Write data rows: derivation, address, key (WIF format)
-                for derivation_path, wif, _, address in keys_data:
-                    writer.writerow([derivation_path, address, wif])
-
-            print(f"✓ Successfully saved {len(keys_data)} keys to {file_path}")
-            print(f"✓ Format: {DETAILED_CSV_HEADER}")
-            return True
-
-        except Exception as e:
-            print(f"✗ Error saving keys in detailed format: {e}")
-            return False
-
-    def save_keys_json_format(
-        self,
-        keys_data: List[Tuple[str, str, str, str]],
-        filename: Optional[str] = None,
-    ) -> bool:
-        """
-        Save keys in JSON format with rich metadata.
-
-        Args:
-            keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
-            filename: Optional filename (without extension)
-
-        Returns:
-            True if successful, False otherwise
-        """
-        if not keys_data:
-            print("✗ No keys data provided")
-            return False
-
-        try:
-            # Generate filename if not provided
-            if not filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{DEFAULT_SAVE_FILENAME}_export_{timestamp}"
-
-            # Ensure JSON extension
-            if not filename.endswith(".json"):
-                filename += ".json"
-
-            # Create Path object
-            file_path = Path(filename)
-
-            # Build JSON structure
-            export_data: Dict[str, Any] = {
-                "export_info": {
-                    "timestamp": datetime.now().isoformat(),
-                    "format_version": "1.0",
-                    "total_keys": len(keys_data),
-                    "wallet_type": "BSV",
-                    "exported_by": "BSV HD Wallet Key Derivation Tool",
-                },
-                "keys": []
+        # Add key data
+        for i, (derivation_path, wif, public_key_hex, address) in enumerate(keys_data):
+            key_entry = {
+                "index": i,
+                "derivation_path": derivation_path,
+                "address": address,
+                "private_key_wif": wif,
+                "public_key_hex": public_key_hex,
+                "address_type": "P2PKH",
+                "created_at": datetime.now().isoformat(),
             }
+            export_data["keys"].append(key_entry)
 
-            # Add key data
-            for i, (derivation_path, wif, public_key_hex, address) in enumerate(keys_data):
-                key_entry = {
-                    "index": i,
-                    "derivation_path": derivation_path,
-                    "address": address,
-                    "private_key_wif": wif,
-                    "public_key_hex": public_key_hex,
-                    "address_type": "P2PKH",
-                    "created_at": datetime.now().isoformat(),
-                }
-                export_data["keys"].append(key_entry)
+        # Calculate checksums for verification
+        keys_json = json.dumps(export_data["keys"], sort_keys=True)
+        export_data["checksums"] = {
+            "sha256": hashlib.sha256(keys_json.encode()).hexdigest(),
+            "md5": hashlib.md5(keys_json.encode()).hexdigest(),
+        }
 
-            # Calculate checksums for verification
-            keys_json = json.dumps(export_data["keys"], sort_keys=True)
-            export_data["checksums"] = {
-                "sha256": hashlib.sha256(keys_json.encode()).hexdigest(),
-                "md5": hashlib.md5(keys_json.encode()).hexdigest(),
-            }
+        return json.dumps(export_data, indent=2, ensure_ascii=False)
 
-            # Write JSON file
-            with open(file_path, "w", encoding="utf-8") as jsonfile:
-                json.dump(export_data, jsonfile, indent=2, ensure_ascii=False)
+    def save_keys(
+        self,
+        keys_data: List[Tuple[str, str, str, str]],
+        export_format: str,
+        filename: Optional[str] = None,
+    ) -> str:
+        """
+        Save keys in specified format.
 
-            print(f"✓ Successfully saved {len(keys_data)} keys to {file_path}")
-            print("✓ Format: JSON with metadata and checksums")
-            print(f"✓ File size: {file_path.stat().st_size} bytes")
-            return True
+        Args:
+            keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
+            export_format: Format to save ("simple_csv", "detailed_csv", "json")
+            filename: Optional filename (without extension)
+
+        Returns:
+            Path to the saved file
+        """
+        if not keys_data:
+            raise NoKeysAvailableError("No keys data provided")
+
+        try:
+            # Generate content based on format
+            if export_format == EXPORT_FORMAT_SIMPLE_CSV:
+                content = self._generate_simple_csv_content(keys_data)
+                extension = ".csv"
+                format_suffix = "simple"
+            elif export_format == EXPORT_FORMAT_DETAILED_CSV:
+                content = self._generate_detailed_csv_content(keys_data)
+                extension = ".csv"
+                format_suffix = "detailed"
+            elif export_format == EXPORT_FORMAT_JSON:
+                content = self._generate_json_content(keys_data)
+                extension = ".json"
+                format_suffix = "export"
+            else:
+                raise ValueError(f"Unsupported export format: {export_format}")
+
+            # Generate filename if not provided
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{DEFAULT_SAVE_FILENAME}_{format_suffix}_{timestamp}"
+
+            # Ensure correct extension
+            if not filename.endswith(extension):
+                filename += extension
+
+            # Create Path object and write file
+            file_path = Path(filename)
+            with open(file_path, "w", newline="", encoding="utf-8") as f:
+                f.write(content)
+
+            return str(file_path)
 
         except Exception as e:
-            print(f"✗ Error saving keys in JSON format: {e}")
-            return False
+            raise FileOperationError(
+                f"Error saving keys in {export_format} format: {e}"
+            ) from e
 
     def _encrypt_data(self, data: str, password: str) -> str:
         """
         Encrypt data using AES encryption with password-based key derivation.
-        
+
         Args:
             data: String data to encrypt
             password: Password for encryption
-            
+
         Returns:
             Base64-encoded encrypted data (salt + encrypted content)
         """
+        if not password:
+            raise InvalidPasswordError("Empty password provided")
+
         try:
             # Generate a random salt (16 bytes)
             salt = os.urandom(16)
-            
+
             # Derive key from password using PBKDF2
             kdf = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
@@ -568,37 +564,42 @@ class HDWalletTool:
                 iterations=100000,  # OWASP recommended minimum
             )
             key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
-            
+
             # Encrypt the data
             fernet = Fernet(key)
             encrypted_data = fernet.encrypt(data.encode())
-            
+
             # Return salt + encrypted data as base64
             return base64.b64encode(salt + encrypted_data).decode()
-            
-        except Exception as e:
-            print(f"✗ Encryption error: {e}")
-            return ""
 
-    def _decrypt_data(self, encrypted_data: str, password: str) -> Optional[str]:
+        except Exception as e:
+            raise EncryptionError(f"Encryption error: {e}") from e
+
+    def _decrypt_data(self, encrypted_data: str, password: str) -> str:
         """
         Decrypt data using AES encryption with password-based key derivation.
-        
+
         Args:
             encrypted_data: Base64-encoded encrypted data
             password: Password for decryption
-            
+
         Returns:
-            Decrypted string data or None if failed
+            Decrypted string data
         """
+        if not password:
+            raise InvalidPasswordError("Empty password provided")
+
+        if not encrypted_data:
+            raise DecryptionError("No encrypted data provided")
+
         try:
             # Decode the base64 data
             encrypted_bytes = base64.b64decode(encrypted_data)
-            
+
             # Extract salt (first 16 bytes)
             salt = encrypted_bytes[:16]
             encrypted_content = encrypted_bytes[16:]
-            
+
             # Derive key from password using same parameters
             kdf = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
@@ -607,187 +608,144 @@ class HDWalletTool:
                 iterations=100000,
             )
             key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
-            
+
             # Decrypt the data
             fernet = Fernet(key)
             decrypted_data = fernet.decrypt(encrypted_content)
-            
+
             return decrypted_data.decode()
-            
+
         except Exception as e:
-            print(f"✗ Decryption error: {e}")
-            return None
+            raise DecryptionError(f"Decryption error: {e}") from e
+
+    def _validate_encryption_parameters(
+        self,
+        keys_data: List[Tuple[str, str, str, str]],
+        password: str,
+        password_confirm: str,
+    ) -> None:
+        """Validate parameters for encryption operations."""
+        if not keys_data:
+            raise NoKeysAvailableError("No keys data provided")
+
+        if not password:
+            raise InvalidPasswordError("Empty password provided")
+
+        if password != password_confirm:
+            raise InvalidPasswordError("Passwords do not match")
+
+    def _generate_encrypted_content(
+        self, keys_data: List[Tuple[str, str, str, str]], export_format: str
+    ) -> str:
+        """Generate content for encryption based on export format."""
+        if export_format == EXPORT_FORMAT_JSON:
+            content = self._generate_json_content(keys_data)
+            # Add encrypted flag to the JSON
+            data = json.loads(content)
+            data["export_info"]["encrypted"] = True
+            return json.dumps(data, indent=2)
+        if export_format == EXPORT_FORMAT_CSV_SIMPLE:
+            return self._generate_simple_csv_content(keys_data)
+        if export_format == EXPORT_FORMAT_CSV_DETAILED:
+            return self._generate_detailed_csv_content(keys_data)
+
+        raise ValueError(f"Unsupported export format: {export_format}")
+
+    def _generate_encrypted_filename(
+        self, filename: Optional[str], export_format: str
+    ) -> str:
+        """Generate filename for encrypted file."""
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{DEFAULT_SAVE_FILENAME}_encrypted_{export_format}_{timestamp}"
+
+        if not filename.endswith(".enc"):
+            filename += ".enc"
+
+        return filename
 
     def save_keys_encrypted(
         self,
         keys_data: List[Tuple[str, str, str, str]],
+        password: str,
+        password_confirm: str,
+        *,
         export_format: str = "json",
         filename: Optional[str] = None,
-    ) -> bool:
+    ) -> str:
         """
         Save keys in encrypted format with password protection.
-        
+
         Args:
             keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
+            password: Password for encryption
+            password_confirm: Confirmed password
             export_format: Format to encrypt ("json", "csv_simple", "csv_detailed")
             filename: Optional filename (without extension)
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        if not keys_data:
-            print("✗ No keys data provided")
-            return False
 
+        Returns:
+            Path to the saved encrypted file
+        """
         try:
-            # Get password from user
-            password = getpass.getpass("Enter encryption password: ")
-            if not password:
-                print("✗ Empty password provided")
-                return False
-            
-            # Confirm password
-            password_confirm = getpass.getpass("Confirm encryption password: ")
-            if password != password_confirm:
-                print("✗ Passwords do not match")
-                return False
-            
-            # Generate content based on format
-            if export_format == "json":
-                # Create JSON structure
-                export_data: Dict[str, Any] = {
-                    "export_info": {
-                        "timestamp": datetime.now().isoformat(),
-                        "format_version": "1.0",
-                        "total_keys": len(keys_data),
-                        "wallet_type": "BSV",
-                        "exported_by": "BSV HD Wallet Key Derivation Tool",
-                        "encrypted": True,
-                    },
-                    "keys": []
-                }
-                
-                for i, (derivation_path, wif, public_key_hex, address) in enumerate(keys_data):
-                    key_entry = {
-                        "index": i,
-                        "derivation_path": derivation_path,
-                        "address": address,
-                        "private_key_wif": wif,
-                        "public_key_hex": public_key_hex,
-                        "address_type": "P2PKH",
-                        "created_at": datetime.now().isoformat(),
-                    }
-                    export_data["keys"].append(key_entry)
-                
-                # Add checksums
-                keys_json = json.dumps(export_data["keys"], sort_keys=True)
-                export_data["checksums"] = {
-                    "sha256": hashlib.sha256(keys_json.encode()).hexdigest(),
-                    "md5": hashlib.md5(keys_json.encode()).hexdigest(),
-                }
-                
-                content = json.dumps(export_data, indent=2)
-                
-            elif export_format == "csv_simple":
-                content = "address,key\n"
-                for _, wif, _, address in keys_data:
-                    content += f"{address},{wif}\n"
-                    
-            elif export_format == "csv_detailed":
-                content = "derivation,address,key\n"
-                for derivation_path, wif, _, address in keys_data:
-                    content += f"{derivation_path},{address},{wif}\n"
-                    
-            else:
-                print(f"✗ Unsupported export format: {export_format}")
-                return False
-            
-            # Encrypt the content
+            self._validate_encryption_parameters(keys_data, password, password_confirm)
+            content = self._generate_encrypted_content(keys_data, export_format)
             encrypted_content = self._encrypt_data(content, password)
-            if not encrypted_content:
-                print("✗ Encryption failed")
-                return False
-            
-            # Generate filename if not provided
-            if not filename:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{DEFAULT_SAVE_FILENAME}_encrypted_{export_format}_{timestamp}"
-            
-            # Add .enc extension
-            if not filename.endswith(".enc"):
-                filename += ".enc"
-            
-            # Create Path object
-            file_path = Path(filename)
-            
+            final_filename = self._generate_encrypted_filename(filename, export_format)
+
             # Write encrypted file
+            file_path = Path(final_filename)
             with open(file_path, "w", encoding="utf-8") as encfile:
                 encfile.write(encrypted_content)
-            
-            print(f"✓ Successfully saved {len(keys_data)} keys to {file_path}")
-            print(f"✓ Format: {export_format.upper()} (AES-256 encrypted)")
-            print(f"✓ Encryption: PBKDF2 with 100,000 iterations")
-            print("✓ File is password-protected")
-            return True
-            
-        except Exception as e:
-            print(f"✗ Error saving encrypted keys: {e}")
-            return False
 
-    def decrypt_keys_file(self, encrypted_file: str, output_file: Optional[str] = None) -> bool:
+            return str(file_path)
+
+        except Exception as e:
+            raise FileOperationError(f"Error saving encrypted keys: {e}") from e
+
+    def decrypt_keys_file(
+        self, encrypted_file: str, password: str, output_file: Optional[str] = None
+    ) -> str:
         """
         Decrypt a previously encrypted keys file.
-        
+
         Args:
             encrypted_file: Path to encrypted file
+            password: Password for decryption
             output_file: Optional output filename
-            
+
         Returns:
-            True if successful, False otherwise
+            Path to the decrypted file
         """
         try:
             # Check if file exists
             if not Path(encrypted_file).exists():
-                print(f"✗ File not found: {encrypted_file}")
-                return False
-            
+                raise FileOperationError(f"File not found: {encrypted_file}")
+
             # Read encrypted content
             with open(encrypted_file, "r", encoding="utf-8") as encfile:
                 encrypted_content = encfile.read()
-            
-            # Get password from user
-            password = getpass.getpass("Enter decryption password: ")
-            if not password:
-                print("✗ Empty password provided")
-                return False
-            
+
             # Decrypt the content
             decrypted_content = self._decrypt_data(encrypted_content, password)
-            if decrypted_content is None:
-                print("✗ Decryption failed - wrong password or corrupted file")
-                return False
-            
+
             # Generate output filename if not provided
             if not output_file:
                 output_file = encrypted_file.replace(".enc", "_decrypted")
                 # Try to detect format from content
                 if decrypted_content.strip().startswith("{"):
                     output_file += ".json"
-                elif "derivation,address,key" in decrypted_content:
+                elif DETAILED_CSV_HEADER in decrypted_content:
                     output_file += "_detailed.csv"
-                elif "address,key" in decrypted_content:
+                elif SIMPLE_CSV_HEADER in decrypted_content:
                     output_file += "_simple.csv"
                 else:
                     output_file += ".txt"
-            
+
             # Write decrypted content
             with open(output_file, "w", encoding="utf-8") as outfile:
                 outfile.write(decrypted_content)
-            
-            print(f"✓ Successfully decrypted to: {output_file}")
-            print("✓ Decryption successful")
-            return True
-            
+
+            return output_file
+
         except Exception as e:
-            print(f"✗ Error decrypting file: {e}")
-            return False
+            raise FileOperationError(f"Error decrypting file: {e}") from e

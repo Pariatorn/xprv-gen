@@ -11,6 +11,37 @@ __description__ = "BSV HD Wallet Key Derivation Tool"
 
 from .cli import cli_main, run_test_mode
 from .constants import MenuChoice
+from .exceptions import (
+    DecryptionError,
+    DerivationPathError,
+    EncryptionError,
+    FileOperationError,
+    InvalidEntropyError,
+    InvalidIndexRangeError,
+    InvalidMnemonicError,
+    InvalidPasswordError,
+    InvalidXprvError,
+    NoKeysAvailableError,
+    WalletError,
+    WalletNotLoadedError,
+)
 from .wallet import HDWalletTool
 
-__all__ = ["HDWalletTool", "MenuChoice", "cli_main", "run_test_mode"]
+__all__ = [
+    "HDWalletTool",
+    "MenuChoice",
+    "cli_main",
+    "run_test_mode",
+    "WalletError",
+    "InvalidMnemonicError",
+    "InvalidXprvError",
+    "DerivationPathError",
+    "WalletNotLoadedError",
+    "NoKeysAvailableError",
+    "FileOperationError",
+    "EncryptionError",
+    "DecryptionError",
+    "InvalidPasswordError",
+    "InvalidEntropyError",
+    "InvalidIndexRangeError",
+]

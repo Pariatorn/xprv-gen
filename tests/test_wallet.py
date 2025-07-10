@@ -9,6 +9,12 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
+from xprv_gen.exceptions import (
+    DerivationPathError,
+    InvalidMnemonicError,
+    InvalidXprvError,
+    WalletNotLoadedError,
+)
 from xprv_gen.wallet import HDWalletTool
 
 
@@ -50,7 +56,7 @@ class TestHDWalletTool:
         result = self.wallet.load_from_mnemonic(self.test_mnemonic)
 
         # Assertions
-        assert result is True
+        assert result == "BIP39"
         assert self.wallet.master_xprv == mock_xprv
         assert self.wallet.mnemonic == self.test_mnemonic
         mock_validate.assert_called_once_with(self.test_mnemonic)
@@ -80,7 +86,7 @@ class TestHDWalletTool:
         result = self.wallet.load_from_mnemonic(self.test_mnemonic)
 
         # Assertions
-        assert result is True
+        assert result == "Electrum"
         assert self.wallet.master_xprv == mock_xprv
         assert self.wallet.mnemonic == self.test_mnemonic
         mock_pbkdf2.assert_called_once()
@@ -93,11 +99,19 @@ class TestHDWalletTool:
         mock_validate.side_effect = Exception("Invalid mnemonic")
         mock_master_xprv.side_effect = Exception("Failed to create master xprv")
 
-        result = self.wallet.load_from_mnemonic("invalid mnemonic")
+        with pytest.raises(InvalidMnemonicError):
+            self.wallet.load_from_mnemonic("invalid mnemonic")
 
-        assert result is False
         assert self.wallet.master_xprv is None
         assert self.wallet.mnemonic is None
+
+    def test_load_from_mnemonic_empty(self) -> None:
+        """Test loading from empty mnemonic."""
+        with pytest.raises(InvalidMnemonicError, match="Empty mnemonic provided"):
+            self.wallet.load_from_mnemonic("")
+
+        with pytest.raises(InvalidMnemonicError, match="Empty mnemonic provided"):
+            self.wallet.load_from_mnemonic("   ")
 
     @patch("xprv_gen.wallet.bsv.hd.Xprv")
     def test_load_from_xprv_success(self, mock_xprv_class) -> None:
@@ -107,7 +121,7 @@ class TestHDWalletTool:
 
         result = self.wallet.load_from_xprv(self.test_xprv)
 
-        assert result is True
+        assert result == "Extended Private Key"
         assert self.wallet.master_xprv == mock_xprv
         assert self.wallet.mnemonic is None
         mock_xprv_class.assert_called_once_with(self.test_xprv)
@@ -121,23 +135,30 @@ class TestHDWalletTool:
 
         result = self.wallet.load_from_xprv(hex_key)
 
-        assert result is True
+        assert result == "Hex Seed"
         assert self.wallet.master_xprv == mock_xprv
         assert self.wallet.mnemonic is None
 
     def test_load_from_xprv_failure(self) -> None:
         """Test failure loading from xprv."""
-        result = self.wallet.load_from_xprv("invalid_xprv")
+        with pytest.raises(InvalidXprvError):
+            self.wallet.load_from_xprv("invalid_xprv")
 
-        assert result is False
         assert self.wallet.master_xprv is None
         assert self.wallet.mnemonic is None
 
+    def test_load_from_xprv_empty(self) -> None:
+        """Test loading from empty xprv."""
+        with pytest.raises(InvalidXprvError, match="Empty xprv string provided"):
+            self.wallet.load_from_xprv("")
+
+        with pytest.raises(InvalidXprvError, match="Empty xprv string provided"):
+            self.wallet.load_from_xprv("   ")
+
     def test_get_master_xpub_no_wallet(self) -> None:
         """Test getting master xpub with no wallet loaded."""
-        result = self.wallet.get_master_xpub()
-
-        assert result is None
+        with pytest.raises(WalletNotLoadedError, match="No wallet loaded"):
+            self.wallet.get_master_xpub()
 
     def test_get_master_xpub_success(self) -> None:
         """Test successful getting master xpub."""
@@ -154,18 +175,16 @@ class TestHDWalletTool:
 
     def test_derive_single_key_no_wallet(self) -> None:
         """Test deriving single key with no wallet loaded."""
-        result = self.wallet.derive_single_key("m/0/1")
-
-        assert result is None
+        with pytest.raises(WalletNotLoadedError, match="No wallet loaded"):
+            self.wallet.derive_single_key("m/0/1")
 
     def test_derive_single_key_invalid_path(self) -> None:
         """Test deriving single key with invalid path."""
         mock_xprv = MagicMock()
         self.wallet.master_xprv = mock_xprv
 
-        result = self.wallet.derive_single_key("invalid/path")
-
-        assert result is None
+        with pytest.raises(DerivationPathError):
+            self.wallet.derive_single_key("invalid/path")
 
     def test_derive_single_key_success(self) -> None:
         """Test successful single key derivation."""
@@ -194,7 +213,8 @@ class TestHDWalletTool:
         result = self.wallet.derive_single_key("m/0/1")
 
         assert result is not None
-        wif, pub_hex, address = result
+        derivation_path, wif, pub_hex, address = result
+        assert derivation_path == "m/0/1"
         assert wif == "KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn"
         assert pub_hex == "abcdef123456"
         assert address == "1ABC123"
@@ -329,7 +349,9 @@ class TestHDWalletTool:
 
     @patch("xprv_gen.wallet.secrets.token_bytes")
     @patch("xprv_gen.wallet.bsv.hd.mnemonic_from_entropy")
-    def test_generate_new_wallet_secure_success(self, mock_mnemonic_from_entropy, mock_token_bytes) -> None:
+    def test_generate_new_wallet_secure_success(
+        self, mock_mnemonic_from_entropy, mock_token_bytes
+    ) -> None:
         """Test successful secure new wallet generation."""
         mock_token_bytes.return_value = b"a" * 32
         mock_mnemonic_from_entropy.return_value = self.test_mnemonic
@@ -397,10 +419,15 @@ class TestHDWalletTool:
     @patch("xprv_gen.wallet.getpass.getpass")
     @patch("builtins.open", new_callable=mock_open)
     @patch("xprv_gen.wallet.Path")
-    def test_save_keys_encrypted_success(self, mock_path, mock_file, mock_getpass) -> None:
+    def test_save_keys_encrypted_success(
+        self, mock_path, mock_file, mock_getpass
+    ) -> None:
         """Test successful encrypted keys save."""
-        mock_getpass.side_effect = ["test_password", "test_password"]  # Password and confirmation
-        
+        mock_getpass.side_effect = [
+            "test_password",
+            "test_password",
+        ]  # Password and confirmation
+
         test_data = [
             ("m/44'/0'/0'/0/0", "wif1", "pubkey1", "address1"),
         ]
@@ -415,7 +442,7 @@ class TestHDWalletTool:
     def test_save_keys_encrypted_password_mismatch(self, mock_getpass) -> None:
         """Test encrypted save with password mismatch."""
         mock_getpass.side_effect = ["password1", "password2"]  # Different passwords
-        
+
         test_data = [("m/44'/0'/0'/0/0", "wif1", "pubkey1", "address1")]
 
         result = self.wallet.save_keys_encrypted(test_data, "json")
@@ -426,7 +453,7 @@ class TestHDWalletTool:
     def test_save_keys_encrypted_empty_password(self, mock_getpass) -> None:
         """Test encrypted save with empty password."""
         mock_getpass.return_value = ""
-        
+
         test_data = [("m/44'/0'/0'/0/0", "wif1", "pubkey1", "address1")]
 
         result = self.wallet.save_keys_encrypted(test_data, "json")
@@ -436,7 +463,9 @@ class TestHDWalletTool:
     @patch("xprv_gen.wallet.getpass.getpass")
     @patch("builtins.open", new_callable=mock_open, read_data="encrypted_content")
     @patch("xprv_gen.wallet.Path")
-    def test_decrypt_keys_file_success(self, mock_path, mock_file, mock_getpass) -> None:
+    def test_decrypt_keys_file_success(
+        self, mock_path, mock_file, mock_getpass
+    ) -> None:
         """Test successful file decryption."""
         mock_getpass.return_value = "test_password"
         mock_path_instance = MagicMock()

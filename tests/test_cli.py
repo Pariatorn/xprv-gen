@@ -56,9 +56,7 @@ class TestMain:
     @patch("xprv_gen.cli.HDWalletTool")
     @patch("xprv_gen.cli.get_menu_handlers")
     @patch("xprv_gen.cli.print_menu")
-    @patch(
-        "builtins.input", side_effect=["9"]
-    )  # Choose exit (new exit choice)
+    @patch("builtins.input", side_effect=["9"])  # Choose exit (new exit choice)
     def test_main_exit(
         self, mock_input, mock_print_menu, mock_get_handlers, mock_wallet_class, capsys
     ) -> None:
@@ -123,7 +121,9 @@ class TestMain:
 
         # Verify error message (updated to reflect choice validation)
         captured = capsys.readouterr()
-        assert "✗ Invalid choice or option not available in current state." in captured.out
+        assert (
+            "✗ Invalid choice or option not available in current state." in captured.out
+        )
 
     @patch("xprv_gen.cli.HDWalletTool")
     @patch("xprv_gen.cli.get_menu_handlers")
@@ -145,7 +145,9 @@ class TestMain:
 
         # Verify error message (choice validation comes first)
         captured = capsys.readouterr()
-        assert "✗ Invalid choice or option not available in current state." in captured.out
+        assert (
+            "✗ Invalid choice or option not available in current state." in captured.out
+        )
 
 
 class TestCliMain:

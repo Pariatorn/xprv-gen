@@ -32,7 +32,7 @@ class TestPrintMenu:
         mock_wallet = MagicMock()
         mock_wallet.is_wallet_loaded = False
         mock_wallet.has_derived_keys = False
-        
+
         print_menu(mock_wallet)
         captured = capsys.readouterr()
         output = captured.out
@@ -57,7 +57,7 @@ class TestPrintMenu:
         mock_wallet = MagicMock()
         mock_wallet.is_wallet_loaded = True
         mock_wallet.has_derived_keys = False
-        
+
         print_menu(mock_wallet)
         captured = capsys.readouterr()
         output = captured.out
@@ -66,7 +66,7 @@ class TestPrintMenu:
         assert "4. Show master xpub" in output
         assert "5. Derive single key from path" in output
         assert "6. Derive key range" in output
-        
+
         # Check that export option is NOT present
         assert "7. Export keys" not in output
 
@@ -75,7 +75,7 @@ class TestPrintMenu:
         mock_wallet = MagicMock()
         mock_wallet.is_wallet_loaded = True
         mock_wallet.has_derived_keys = True
-        
+
         print_menu(mock_wallet)
         captured = capsys.readouterr()
         output = captured.out
@@ -271,7 +271,16 @@ class TestChoiceValidation:
 
         valid_choices = get_valid_choices(self.mock_wallet)
 
-        expected_choices = ["1", "2", "3", "8", "9", "4", "5", "6"]  # Basic + wallet options
+        expected_choices = [
+            "1",
+            "2",
+            "3",
+            "8",
+            "9",
+            "4",
+            "5",
+            "6",
+        ]  # Basic + wallet options
         assert valid_choices == expected_choices
 
     def test_get_valid_choices_keys_derived(self) -> None:

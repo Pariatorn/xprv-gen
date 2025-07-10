@@ -12,18 +12,18 @@ from xprv_gen.constants import (
     DEFAULT_SAVE_FILENAME,
     DERIVATION_PATH_PREFIX,
     DETAILED_CSV_HEADER,
-    EncryptedExportChoice,
-    ExportChoice,
     HARDENED_KEY_FLAG,
     INITIAL_MENU_CHOICES,
     KEYS_DERIVED_CHOICES,
-    MenuChoice,
     PBKDF2_ITERATIONS,
     SEED_LENGTH_32,
     SEED_LENGTH_64,
     SIMPLE_CSV_HEADER,
     TEST_MODE_ARG,
     WALLET_LOADED_CHOICES,
+    EncryptedExportChoice,
+    ExportChoice,
+    MenuChoice,
 )
 
 
