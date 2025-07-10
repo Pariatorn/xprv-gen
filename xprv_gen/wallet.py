@@ -6,19 +6,26 @@ wallet operations including loading from mnemonic/xprv, key derivation,
 and address generation.
 """
 
+import csv
 import hashlib
 import hmac
+from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import bsv.hd
 
 from .constants import (
     ALPHABET,
+    CSV_EXTENSION,
+    DEFAULT_SAVE_FILENAME,
     DERIVATION_PATH_PREFIX,
+    DETAILED_CSV_HEADER,
     HARDENED_KEY_FLAG,
     PBKDF2_ITERATIONS,
     SEED_LENGTH_32,
     SEED_LENGTH_64,
+    SIMPLE_CSV_HEADER,
 )
 
 
@@ -28,6 +35,7 @@ class HDWalletTool:
     def __init__(self) -> None:
         self.master_xprv: Optional[bsv.hd.Xprv] = None
         self.mnemonic: Optional[str] = None
+        self.last_derived_keys: List[Tuple[str, str, str, str]] = []
 
     def load_from_mnemonic(self, mnemonic: str) -> bool:
         """Load wallet from mnemonic seed phrase."""
@@ -196,6 +204,9 @@ class HDWalletTool:
             print(f"  Public Key (hex): {public_key_hex}")
             print(f"  Address: {address}")
 
+            # Store the derived key for potential saving
+            self.last_derived_keys = [(derivation_path, wif, public_key_hex, address)]
+
             return wif, public_key_hex, address
 
         except Exception as e:
@@ -244,6 +255,9 @@ class HDWalletTool:
                     print(f"  Address: {address}")
                     print()
 
+                # Store the derived keys for potential saving
+                self.last_derived_keys = results
+
                 return results
 
             # Manual derivation when no mnemonic is available
@@ -284,6 +298,9 @@ class HDWalletTool:
                 print(f"  Address: {address}")
                 print()
 
+            # Store the derived keys for potential saving
+            self.last_derived_keys = results
+
             return results
 
         except Exception as e:
@@ -305,4 +322,106 @@ class HDWalletTool:
 
         except Exception as e:
             print(f"✗ Error generating new wallet: {e}")
+            return False
+
+    def save_keys_simple_format(
+        self,
+        keys_data: List[Tuple[str, str, str, str]],
+        filename: Optional[str] = None,
+    ) -> bool:
+        """
+        Save keys in simple CSV format: address,key.
+
+        Args:
+            keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
+            filename: Optional filename (without extension)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not keys_data:
+            print("✗ No keys data provided")
+            return False
+
+        try:
+            # Generate filename if not provided
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{DEFAULT_SAVE_FILENAME}_simple_{timestamp}"
+
+            # Ensure CSV extension
+            if not filename.endswith(CSV_EXTENSION):
+                filename += CSV_EXTENSION
+
+            # Create Path object
+            file_path = Path(filename)
+
+            # Write CSV file
+            with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write header
+                writer.writerow(SIMPLE_CSV_HEADER.split(","))
+                
+                # Write data rows: address, key (WIF format)
+                for _, wif, _, address in keys_data:
+                    writer.writerow([address, wif])
+
+            print(f"✓ Successfully saved {len(keys_data)} keys to {file_path}")
+            print(f"✓ Format: {SIMPLE_CSV_HEADER}")
+            return True
+
+        except Exception as e:
+            print(f"✗ Error saving keys in simple format: {e}")
+            return False
+
+    def save_keys_detailed_format(
+        self,
+        keys_data: List[Tuple[str, str, str, str]],
+        filename: Optional[str] = None,
+    ) -> bool:
+        """
+        Save keys in detailed CSV format: derivation,address,key.
+
+        Args:
+            keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
+            filename: Optional filename (without extension)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not keys_data:
+            print("✗ No keys data provided")
+            return False
+
+        try:
+            # Generate filename if not provided
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{DEFAULT_SAVE_FILENAME}_detailed_{timestamp}"
+
+            # Ensure CSV extension
+            if not filename.endswith(CSV_EXTENSION):
+                filename += CSV_EXTENSION
+
+            # Create Path object
+            file_path = Path(filename)
+
+            # Write CSV file
+            with open(file_path, "w", newline="", encoding="utf-8") as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write header
+                writer.writerow(DETAILED_CSV_HEADER.split(","))
+                
+                # Write data rows: derivation, address, key (WIF format)
+                for derivation_path, wif, _, address in keys_data:
+                    writer.writerow([derivation_path, address, wif])
+
+            print(f"✓ Successfully saved {len(keys_data)} keys to {file_path}")
+            print(f"✓ Format: {DETAILED_CSV_HEADER}")
+            return True
+
+        except Exception as e:
+            print(f"✗ Error saving keys in detailed format: {e}")
             return False

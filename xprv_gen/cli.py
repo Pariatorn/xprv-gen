@@ -19,7 +19,7 @@ def main() -> None:
 
     while True:
         print_menu()
-        choice = input("Enter your choice (1-7): ").strip()
+        choice = input("Enter your choice (1-9): ").strip()
 
         # Convert string choice to enum
         try:

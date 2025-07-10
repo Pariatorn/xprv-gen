@@ -20,6 +20,12 @@ ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 # Test mode identifier
 TEST_MODE_ARG = "test"
 
+# Save format constants
+SIMPLE_CSV_HEADER = "address,key"
+DETAILED_CSV_HEADER = "derivation,address,key"
+DEFAULT_SAVE_FILENAME = "wallet_keys"
+CSV_EXTENSION = ".csv"
+
 
 class MenuChoice(Enum):
     """Menu choice enumeration for the CLI interface."""
@@ -30,4 +36,6 @@ class MenuChoice(Enum):
     SHOW_MASTER_XPUB = "4"
     DERIVE_SINGLE_KEY = "5"
     DERIVE_KEY_RANGE = "6"
-    EXIT = "7"
+    SAVE_SIMPLE_FORMAT = "7"
+    SAVE_DETAILED_FORMAT = "8"
+    EXIT = "9"

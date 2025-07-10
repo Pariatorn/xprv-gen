@@ -22,7 +22,9 @@ def print_menu() -> None:
     print("4. Show master xpub")
     print("5. Derive single key from path (e.g., m/0/1234)")
     print("6. Derive key range (e.g., m/44'/0'/0' indices 0-10)")
-    print("7. Exit")
+    print("7. Save keys (simple format: address,key)")
+    print("8. Save keys (detailed format: derivation,address,key)")
+    print("9. Exit")
     print("=" * 60)
 
 
@@ -85,6 +87,36 @@ def handle_derive_key_range(wallet: HDWalletTool) -> None:
         print("✗ Invalid indices provided")
 
 
+def handle_save_simple_format(wallet: HDWalletTool) -> None:
+    """Handle saving keys in simple format."""
+    print("\n--- Save Keys (Simple Format) ---")
+    
+    if not wallet.last_derived_keys:
+        print("✗ No keys available to save")
+        print("  Please derive keys first using options 5 or 6")
+        return
+    
+    filename_input = input("Enter filename (optional, press Enter for auto-generated): ").strip()
+    filename = filename_input if filename_input else None
+    
+    wallet.save_keys_simple_format(wallet.last_derived_keys, filename)
+
+
+def handle_save_detailed_format(wallet: HDWalletTool) -> None:
+    """Handle saving keys in detailed format."""
+    print("\n--- Save Keys (Detailed Format) ---")
+    
+    if not wallet.last_derived_keys:
+        print("✗ No keys available to save")
+        print("  Please derive keys first using options 5 or 6")
+        return
+    
+    filename_input = input("Enter filename (optional, press Enter for auto-generated): ").strip()
+    filename = filename_input if filename_input else None
+    
+    wallet.save_keys_detailed_format(wallet.last_derived_keys, filename)
+
+
 def get_menu_handlers() -> Dict[MenuChoice, Callable[[HDWalletTool], None]]:
     """Get the mapping of menu choices to their handler functions."""
     return {
@@ -94,4 +126,6 @@ def get_menu_handlers() -> Dict[MenuChoice, Callable[[HDWalletTool], None]]:
         MenuChoice.SHOW_MASTER_XPUB: handle_show_master_xpub,
         MenuChoice.DERIVE_SINGLE_KEY: handle_derive_single_key,
         MenuChoice.DERIVE_KEY_RANGE: handle_derive_key_range,
+        MenuChoice.SAVE_SIMPLE_FORMAT: handle_save_simple_format,
+        MenuChoice.SAVE_DETAILED_FORMAT: handle_save_detailed_format,
     }
