@@ -6,6 +6,9 @@ bsv-sdk>=1.0.0
 # Additional mnemonic support (fallback compatibility)
 mnemonic>=0.19
 
+# Cryptography for secure key export encryption
+cryptography>=41.0.0
+
 # Development tools (optional but recommended)
 black>=23.0.0
 isort>=5.12.0

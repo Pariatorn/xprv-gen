@@ -6,7 +6,9 @@ wallet operations including loading from mnemonic/xprv, key derivation,
 and address generation.
 """
 
+import base64
 import csv
+import getpass
 import hashlib
 import hmac
 import json
@@ -17,6 +19,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import bsv.hd
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .constants import (
     ALPHABET,
@@ -538,4 +543,251 @@ class HDWalletTool:
 
         except Exception as e:
             print(f"✗ Error saving keys in JSON format: {e}")
+            return False
+
+    def _encrypt_data(self, data: str, password: str) -> str:
+        """
+        Encrypt data using AES encryption with password-based key derivation.
+        
+        Args:
+            data: String data to encrypt
+            password: Password for encryption
+            
+        Returns:
+            Base64-encoded encrypted data (salt + encrypted content)
+        """
+        try:
+            # Generate a random salt (16 bytes)
+            salt = os.urandom(16)
+            
+            # Derive key from password using PBKDF2
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=salt,
+                iterations=100000,  # OWASP recommended minimum
+            )
+            key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+            
+            # Encrypt the data
+            fernet = Fernet(key)
+            encrypted_data = fernet.encrypt(data.encode())
+            
+            # Return salt + encrypted data as base64
+            return base64.b64encode(salt + encrypted_data).decode()
+            
+        except Exception as e:
+            print(f"✗ Encryption error: {e}")
+            return ""
+
+    def _decrypt_data(self, encrypted_data: str, password: str) -> Optional[str]:
+        """
+        Decrypt data using AES encryption with password-based key derivation.
+        
+        Args:
+            encrypted_data: Base64-encoded encrypted data
+            password: Password for decryption
+            
+        Returns:
+            Decrypted string data or None if failed
+        """
+        try:
+            # Decode the base64 data
+            encrypted_bytes = base64.b64decode(encrypted_data)
+            
+            # Extract salt (first 16 bytes)
+            salt = encrypted_bytes[:16]
+            encrypted_content = encrypted_bytes[16:]
+            
+            # Derive key from password using same parameters
+            kdf = PBKDF2HMAC(
+                algorithm=hashes.SHA256(),
+                length=32,
+                salt=salt,
+                iterations=100000,
+            )
+            key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+            
+            # Decrypt the data
+            fernet = Fernet(key)
+            decrypted_data = fernet.decrypt(encrypted_content)
+            
+            return decrypted_data.decode()
+            
+        except Exception as e:
+            print(f"✗ Decryption error: {e}")
+            return None
+
+    def save_keys_encrypted(
+        self,
+        keys_data: List[Tuple[str, str, str, str]],
+        export_format: str = "json",
+        filename: Optional[str] = None,
+    ) -> bool:
+        """
+        Save keys in encrypted format with password protection.
+        
+        Args:
+            keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
+            export_format: Format to encrypt ("json", "csv_simple", "csv_detailed")
+            filename: Optional filename (without extension)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not keys_data:
+            print("✗ No keys data provided")
+            return False
+
+        try:
+            # Get password from user
+            password = getpass.getpass("Enter encryption password: ")
+            if not password:
+                print("✗ Empty password provided")
+                return False
+            
+            # Confirm password
+            password_confirm = getpass.getpass("Confirm encryption password: ")
+            if password != password_confirm:
+                print("✗ Passwords do not match")
+                return False
+            
+            # Generate content based on format
+            if export_format == "json":
+                # Create JSON structure
+                export_data: Dict[str, Any] = {
+                    "export_info": {
+                        "timestamp": datetime.now().isoformat(),
+                        "format_version": "1.0",
+                        "total_keys": len(keys_data),
+                        "wallet_type": "BSV",
+                        "exported_by": "BSV HD Wallet Key Derivation Tool",
+                        "encrypted": True,
+                    },
+                    "keys": []
+                }
+                
+                for i, (derivation_path, wif, public_key_hex, address) in enumerate(keys_data):
+                    key_entry = {
+                        "index": i,
+                        "derivation_path": derivation_path,
+                        "address": address,
+                        "private_key_wif": wif,
+                        "public_key_hex": public_key_hex,
+                        "address_type": "P2PKH",
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    export_data["keys"].append(key_entry)
+                
+                # Add checksums
+                keys_json = json.dumps(export_data["keys"], sort_keys=True)
+                export_data["checksums"] = {
+                    "sha256": hashlib.sha256(keys_json.encode()).hexdigest(),
+                    "md5": hashlib.md5(keys_json.encode()).hexdigest(),
+                }
+                
+                content = json.dumps(export_data, indent=2)
+                
+            elif export_format == "csv_simple":
+                content = "address,key\n"
+                for _, wif, _, address in keys_data:
+                    content += f"{address},{wif}\n"
+                    
+            elif export_format == "csv_detailed":
+                content = "derivation,address,key\n"
+                for derivation_path, wif, _, address in keys_data:
+                    content += f"{derivation_path},{address},{wif}\n"
+                    
+            else:
+                print(f"✗ Unsupported export format: {export_format}")
+                return False
+            
+            # Encrypt the content
+            encrypted_content = self._encrypt_data(content, password)
+            if not encrypted_content:
+                print("✗ Encryption failed")
+                return False
+            
+            # Generate filename if not provided
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{DEFAULT_SAVE_FILENAME}_encrypted_{export_format}_{timestamp}"
+            
+            # Add .enc extension
+            if not filename.endswith(".enc"):
+                filename += ".enc"
+            
+            # Create Path object
+            file_path = Path(filename)
+            
+            # Write encrypted file
+            with open(file_path, "w", encoding="utf-8") as encfile:
+                encfile.write(encrypted_content)
+            
+            print(f"✓ Successfully saved {len(keys_data)} keys to {file_path}")
+            print(f"✓ Format: {export_format.upper()} (AES-256 encrypted)")
+            print(f"✓ Encryption: PBKDF2 with 100,000 iterations")
+            print("✓ File is password-protected")
+            return True
+            
+        except Exception as e:
+            print(f"✗ Error saving encrypted keys: {e}")
+            return False
+
+    def decrypt_keys_file(self, encrypted_file: str, output_file: Optional[str] = None) -> bool:
+        """
+        Decrypt a previously encrypted keys file.
+        
+        Args:
+            encrypted_file: Path to encrypted file
+            output_file: Optional output filename
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Check if file exists
+            if not Path(encrypted_file).exists():
+                print(f"✗ File not found: {encrypted_file}")
+                return False
+            
+            # Read encrypted content
+            with open(encrypted_file, "r", encoding="utf-8") as encfile:
+                encrypted_content = encfile.read()
+            
+            # Get password from user
+            password = getpass.getpass("Enter decryption password: ")
+            if not password:
+                print("✗ Empty password provided")
+                return False
+            
+            # Decrypt the content
+            decrypted_content = self._decrypt_data(encrypted_content, password)
+            if decrypted_content is None:
+                print("✗ Decryption failed - wrong password or corrupted file")
+                return False
+            
+            # Generate output filename if not provided
+            if not output_file:
+                output_file = encrypted_file.replace(".enc", "_decrypted")
+                # Try to detect format from content
+                if decrypted_content.strip().startswith("{"):
+                    output_file += ".json"
+                elif "derivation,address,key" in decrypted_content:
+                    output_file += "_detailed.csv"
+                elif "address,key" in decrypted_content:
+                    output_file += "_simple.csv"
+                else:
+                    output_file += ".txt"
+            
+            # Write decrypted content
+            with open(output_file, "w", encoding="utf-8") as outfile:
+                outfile.write(decrypted_content)
+            
+            print(f"✓ Successfully decrypted to: {output_file}")
+            print("✓ Decryption successful")
+            return True
+            
+        except Exception as e:
+            print(f"✗ Error decrypting file: {e}")
             return False

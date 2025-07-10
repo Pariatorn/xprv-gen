@@ -5,7 +5,7 @@ This module tests the core HDWalletTool functionality including mnemonic loading
 xprv loading, key derivation, and wallet generation.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
@@ -309,3 +309,156 @@ class TestHDWalletTool:
 
         with pytest.raises(ValueError):
             self.wallet._base58_decode("O")  # O is not in Base58 alphabet
+
+    def test_wallet_state_properties(self) -> None:
+        """Test wallet state property methods."""
+        # Test initial state
+        assert self.wallet.is_wallet_loaded is False
+        assert self.wallet.has_derived_keys is False
+
+        # Test with wallet loaded
+        mock_xprv = MagicMock()
+        self.wallet.master_xprv = mock_xprv
+        assert self.wallet.is_wallet_loaded is True
+        assert self.wallet.has_derived_keys is False
+
+        # Test with keys derived
+        self.wallet.last_derived_keys = [("m/0/0", "wif", "pubkey", "address")]
+        assert self.wallet.is_wallet_loaded is True
+        assert self.wallet.has_derived_keys is True
+
+    @patch("xprv_gen.wallet.secrets.token_bytes")
+    @patch("xprv_gen.wallet.bsv.hd.mnemonic_from_entropy")
+    def test_generate_new_wallet_secure_success(self, mock_mnemonic_from_entropy, mock_token_bytes) -> None:
+        """Test successful secure new wallet generation."""
+        mock_token_bytes.return_value = b"a" * 32
+        mock_mnemonic_from_entropy.return_value = self.test_mnemonic
+
+        with patch.object(
+            self.wallet, "load_from_mnemonic", return_value=True
+        ) as mock_load:
+            result = self.wallet.generate_new_wallet_secure()
+
+            assert result is True
+            mock_token_bytes.assert_called_once_with(32)
+            # The bytes are converted to hex, so "a" * 32 becomes "61" * 32
+            expected_hex = (b"a" * 32).hex()
+            mock_mnemonic_from_entropy.assert_called_once_with(expected_hex)
+            mock_load.assert_called_once_with(self.test_mnemonic)
+
+    def test_save_keys_json_format_no_data(self) -> None:
+        """Test JSON format save with no data."""
+        result = self.wallet.save_keys_json_format([])
+        assert result is False
+
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("xprv_gen.wallet.Path")
+    def test_save_keys_json_format_success(self, mock_path, mock_file) -> None:
+        """Test successful JSON format save."""
+        test_data = [
+            ("m/44'/0'/0'/0/0", "wif1", "pubkey1", "address1"),
+            ("m/44'/0'/0'/0/1", "wif2", "pubkey2", "address2"),
+        ]
+
+        mock_path_instance = MagicMock()
+        mock_path_instance.stat.return_value.st_size = 1000
+        mock_path.return_value = mock_path_instance
+
+        result = self.wallet.save_keys_json_format(test_data, "test_export")
+
+        assert result is True
+        mock_file.assert_called_once()
+        mock_path.assert_called_once_with("test_export.json")
+
+    def test_encrypt_decrypt_data_success(self) -> None:
+        """Test successful data encryption and decryption."""
+        test_data = "This is sensitive wallet data"
+        test_password = "secure_password_123"
+
+        encrypted = self.wallet._encrypt_data(test_data, test_password)
+        assert encrypted != ""
+        assert encrypted != test_data
+
+        decrypted = self.wallet._decrypt_data(encrypted, test_password)
+        assert decrypted == test_data
+
+    def test_encrypt_decrypt_data_wrong_password(self) -> None:
+        """Test decryption with wrong password."""
+        test_data = "This is sensitive wallet data"
+        test_password = "secure_password_123"
+        wrong_password = "wrong_password"
+
+        encrypted = self.wallet._encrypt_data(test_data, test_password)
+        assert encrypted != ""
+
+        decrypted = self.wallet._decrypt_data(encrypted, wrong_password)
+        assert decrypted is None
+
+    @patch("xprv_gen.wallet.getpass.getpass")
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("xprv_gen.wallet.Path")
+    def test_save_keys_encrypted_success(self, mock_path, mock_file, mock_getpass) -> None:
+        """Test successful encrypted keys save."""
+        mock_getpass.side_effect = ["test_password", "test_password"]  # Password and confirmation
+        
+        test_data = [
+            ("m/44'/0'/0'/0/0", "wif1", "pubkey1", "address1"),
+        ]
+
+        result = self.wallet.save_keys_encrypted(test_data, "json", "test_encrypted")
+
+        assert result is True
+        mock_getpass.assert_called()
+        mock_file.assert_called_once()
+
+    @patch("xprv_gen.wallet.getpass.getpass")
+    def test_save_keys_encrypted_password_mismatch(self, mock_getpass) -> None:
+        """Test encrypted save with password mismatch."""
+        mock_getpass.side_effect = ["password1", "password2"]  # Different passwords
+        
+        test_data = [("m/44'/0'/0'/0/0", "wif1", "pubkey1", "address1")]
+
+        result = self.wallet.save_keys_encrypted(test_data, "json")
+
+        assert result is False
+
+    @patch("xprv_gen.wallet.getpass.getpass")
+    def test_save_keys_encrypted_empty_password(self, mock_getpass) -> None:
+        """Test encrypted save with empty password."""
+        mock_getpass.return_value = ""
+        
+        test_data = [("m/44'/0'/0'/0/0", "wif1", "pubkey1", "address1")]
+
+        result = self.wallet.save_keys_encrypted(test_data, "json")
+
+        assert result is False
+
+    @patch("xprv_gen.wallet.getpass.getpass")
+    @patch("builtins.open", new_callable=mock_open, read_data="encrypted_content")
+    @patch("xprv_gen.wallet.Path")
+    def test_decrypt_keys_file_success(self, mock_path, mock_file, mock_getpass) -> None:
+        """Test successful file decryption."""
+        mock_getpass.return_value = "test_password"
+        mock_path_instance = MagicMock()
+        mock_path_instance.exists.return_value = True
+        mock_path.return_value = mock_path_instance
+
+        # Mock the decryption to return JSON content
+        with patch.object(
+            self.wallet, "_decrypt_data", return_value='{"test": "data"}'
+        ) as mock_decrypt:
+            result = self.wallet.decrypt_keys_file("test.enc", "output.json")
+
+            assert result is True
+            mock_decrypt.assert_called_once_with("encrypted_content", "test_password")
+
+    @patch("xprv_gen.wallet.Path")
+    def test_decrypt_keys_file_not_found(self, mock_path) -> None:
+        """Test file decryption with non-existent file."""
+        mock_path_instance = MagicMock()
+        mock_path_instance.exists.return_value = False
+        mock_path.return_value = mock_path_instance
+
+        result = self.wallet.decrypt_keys_file("nonexistent.enc")
+
+        assert result is False

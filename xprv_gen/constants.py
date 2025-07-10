@@ -35,6 +35,7 @@ class MenuChoice(Enum):
     LOAD_FROM_MNEMONIC = "1"
     LOAD_FROM_XPRV = "2"
     GENERATE_NEW_WALLET = "3"
+    DECRYPT_FILE = "8"
     EXIT = "9"
 
     # Available after wallet is loaded
@@ -52,7 +53,17 @@ class ExportChoice(Enum):
     EXPORT_SIMPLE_CSV = "1"
     EXPORT_DETAILED_CSV = "2"
     EXPORT_JSON = "3"
-    BACK_TO_MAIN = "4"
+    EXPORT_ENCRYPTED = "4"
+    BACK_TO_MAIN = "5"
+
+
+class EncryptedExportChoice(Enum):
+    """Encrypted export submenu choice enumeration."""
+
+    ENCRYPT_SIMPLE_CSV = "1"
+    ENCRYPT_DETAILED_CSV = "2"
+    ENCRYPT_JSON = "3"
+    BACK_TO_EXPORT = "4"
 
 
 # Menu configuration
@@ -60,6 +71,7 @@ INITIAL_MENU_CHOICES: List[MenuChoice] = [
     MenuChoice.LOAD_FROM_MNEMONIC,
     MenuChoice.LOAD_FROM_XPRV,
     MenuChoice.GENERATE_NEW_WALLET,
+    MenuChoice.DECRYPT_FILE,
     MenuChoice.EXIT,
 ]
 

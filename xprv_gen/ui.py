@@ -8,6 +8,7 @@ functions for the interactive interface.
 from typing import Callable, Dict, List
 
 from .constants import (
+    EncryptedExportChoice,
     ExportChoice,
     INITIAL_MENU_CHOICES,
     KEYS_DERIVED_CHOICES,
@@ -38,6 +39,7 @@ def print_menu(wallet: HDWalletTool) -> None:
         if wallet.has_derived_keys:
             print("7. Export keys")
     
+    print("8. Decrypt existing file")
     print("9. Exit")
     print("=" * 60)
 
@@ -50,7 +52,20 @@ def print_export_menu() -> None:
     print("1. Export as simple CSV (address,key)")
     print("2. Export as detailed CSV (derivation,address,key)")
     print("3. Export as JSON (structured format)")
-    print("4. Back to main menu")
+    print("4. Export encrypted (password-protected)")
+    print("5. Back to main menu")
+    print("=" * 50)
+
+
+def print_encrypted_export_menu() -> None:
+    """Print the encrypted export submenu."""
+    print("\n" + "=" * 50)
+    print("Encrypted Export")
+    print("=" * 50)
+    print("1. Encrypt simple CSV (address,key)")
+    print("2. Encrypt detailed CSV (derivation,address,key)")
+    print("3. Encrypt JSON (structured format)")
+    print("4. Back to export menu")
     print("=" * 50)
 
 
@@ -165,7 +180,7 @@ def handle_export_keys(wallet: HDWalletTool) -> None:
     
     while True:
         print_export_menu()
-        choice = input("Enter your choice (1-4): ").strip()
+        choice = input("Enter your choice (1-5): ").strip()
         
         try:
             export_choice = ExportChoice(choice)
@@ -176,6 +191,8 @@ def handle_export_keys(wallet: HDWalletTool) -> None:
                 handle_save_detailed_format(wallet)
             elif export_choice == ExportChoice.EXPORT_JSON:
                 handle_save_json_format(wallet)
+            elif export_choice == ExportChoice.EXPORT_ENCRYPTED:
+                handle_encrypted_export(wallet)
             elif export_choice == ExportChoice.BACK_TO_MAIN:
                 break
             else:
@@ -200,6 +217,73 @@ def handle_save_json_format(wallet: HDWalletTool) -> None:
     wallet.save_keys_json_format(wallet.last_derived_keys, filename)
 
 
+def handle_encrypted_export(wallet: HDWalletTool) -> None:
+    """Handle the encrypted export submenu."""
+    if not wallet.has_derived_keys:
+        print("✗ No keys available to export")
+        print("  Please derive keys first using options 5 or 6")
+        return
+    
+    while True:
+        print_encrypted_export_menu()
+        choice = input("Enter your choice (1-4): ").strip()
+        
+        try:
+            encrypted_choice = EncryptedExportChoice(choice)
+            
+            if encrypted_choice == EncryptedExportChoice.BACK_TO_EXPORT:
+                break
+            
+            # Only ask for filename if not going back
+            filename_input = input("Enter filename (optional, press Enter for auto-generated): ").strip()
+            filename = filename_input if filename_input else None
+            
+            if encrypted_choice == EncryptedExportChoice.ENCRYPT_SIMPLE_CSV:
+                wallet.save_keys_encrypted(wallet.last_derived_keys, "csv_simple", filename)
+            elif encrypted_choice == EncryptedExportChoice.ENCRYPT_DETAILED_CSV:
+                wallet.save_keys_encrypted(wallet.last_derived_keys, "csv_detailed", filename)
+            elif encrypted_choice == EncryptedExportChoice.ENCRYPT_JSON:
+                wallet.save_keys_encrypted(wallet.last_derived_keys, "json", filename)
+            else:
+                print("✗ Invalid choice")
+                
+        except ValueError:
+            print("✗ Invalid choice")
+
+
+def handle_decrypt_file(wallet: HDWalletTool) -> None:
+    """Handle file decryption."""
+    print("\n--- Decrypt Encrypted File ---")
+    
+    encrypted_file = input("Enter path to encrypted file (.enc): ").strip()
+    if not encrypted_file:
+        print("✗ No file path provided")
+        return
+    
+    output_file_input = input("Enter output filename (optional, press Enter for auto-generated): ").strip()
+    output_file = output_file_input if output_file_input else None
+    
+    wallet.decrypt_keys_file(encrypted_file, output_file)
+
+
+def get_valid_choices(wallet: HDWalletTool) -> List[str]:
+    """Get valid menu choices based on current wallet state."""
+    valid_choices = []
+    
+    # Always available options
+    valid_choices.extend([choice.value for choice in INITIAL_MENU_CHOICES])
+    
+    # Add wallet-dependent options
+    if wallet.is_wallet_loaded:
+        valid_choices.extend([choice.value for choice in WALLET_LOADED_CHOICES])
+        
+        # Add export option if keys are derived
+        if wallet.has_derived_keys:
+            valid_choices.extend([choice.value for choice in KEYS_DERIVED_CHOICES])
+    
+    return valid_choices
+
+
 def get_menu_handlers() -> Dict[MenuChoice, Callable[[HDWalletTool], None]]:
     """Get the mapping of menu choices to their handler functions."""
     return {
@@ -210,4 +294,5 @@ def get_menu_handlers() -> Dict[MenuChoice, Callable[[HDWalletTool], None]]:
         MenuChoice.DERIVE_SINGLE_KEY: handle_derive_single_key,
         MenuChoice.DERIVE_KEY_RANGE: handle_derive_key_range,
         MenuChoice.EXPORT_KEYS: handle_export_keys,
+        MenuChoice.DECRYPT_FILE: handle_decrypt_file,
     }

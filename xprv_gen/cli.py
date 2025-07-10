@@ -8,7 +8,7 @@ handling the interactive menu loop and test mode functionality.
 import sys
 
 from .constants import TEST_MODE_ARG, MenuChoice
-from .ui import get_menu_handlers, print_menu
+from .ui import get_menu_handlers, get_valid_choices, print_menu
 from .wallet import HDWalletTool
 
 
@@ -20,6 +20,13 @@ def main() -> None:
     while True:
         print_menu(wallet)
         choice = input("Enter your choice (1-9): ").strip()
+
+        # Check if choice is valid for current wallet state
+        valid_choices = get_valid_choices(wallet)
+        if choice not in valid_choices:
+            print("✗ Invalid choice or option not available in current state.")
+            input("\nPress Enter to continue...")
+            continue
 
         # Convert string choice to enum
         try:

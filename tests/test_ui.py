@@ -10,11 +10,15 @@ from unittest.mock import MagicMock, patch
 from xprv_gen.constants import MenuChoice
 from xprv_gen.ui import (
     get_menu_handlers,
+    get_valid_choices,
     handle_derive_key_range,
     handle_derive_single_key,
+    handle_encrypted_export,
+    handle_export_keys,
     handle_generate_new_wallet,
     handle_load_from_mnemonic,
     handle_load_from_xprv,
+    handle_save_json_format,
     handle_show_master_xpub,
     print_menu,
 )
@@ -23,26 +27,66 @@ from xprv_gen.ui import (
 class TestPrintMenu:
     """Test class for menu printing functionality."""
 
-    def test_print_menu(self, capsys) -> None:
-        """Test that menu prints correctly."""
-        print_menu()
+    def test_print_menu_no_wallet(self, capsys) -> None:
+        """Test that menu prints correctly with no wallet loaded."""
+        mock_wallet = MagicMock()
+        mock_wallet.is_wallet_loaded = False
+        mock_wallet.has_derived_keys = False
+        
+        print_menu(mock_wallet)
         captured = capsys.readouterr()
         output = captured.out
 
         # Check that title is present
         assert "BSV HD Wallet Key Derivation Tool" in output
 
-        # Check that all menu options are present
+        # Check that only basic options are present
         assert "1. Load wallet from mnemonic seed phrase" in output
         assert "2. Load wallet from master private key (xprv)" in output
         assert "3. Generate new wallet" in output
+        assert "9. Exit" in output
+
+        # Check that advanced options are NOT present
+        assert "4. Show master xpub" not in output
+        assert "5. Derive single key" not in output
+        assert "6. Derive key range" not in output
+        assert "7. Export keys" not in output
+
+    def test_print_menu_wallet_loaded(self, capsys) -> None:
+        """Test that menu prints correctly with wallet loaded."""
+        mock_wallet = MagicMock()
+        mock_wallet.is_wallet_loaded = True
+        mock_wallet.has_derived_keys = False
+        
+        print_menu(mock_wallet)
+        captured = capsys.readouterr()
+        output = captured.out
+
+        # Check that wallet options are present
         assert "4. Show master xpub" in output
         assert "5. Derive single key from path" in output
         assert "6. Derive key range" in output
-        assert "7. Exit" in output
+        
+        # Check that export option is NOT present
+        assert "7. Export keys" not in output
 
-        # Check formatting
-        assert "=" * 60 in output
+    def test_print_menu_keys_derived(self, capsys) -> None:
+        """Test that menu prints correctly with keys derived."""
+        mock_wallet = MagicMock()
+        mock_wallet.is_wallet_loaded = True
+        mock_wallet.has_derived_keys = True
+        
+        print_menu(mock_wallet)
+        captured = capsys.readouterr()
+        output = captured.out
+
+        # Check that all options are present
+        assert "1. Load wallet from mnemonic seed phrase" in output
+        assert "4. Show master xpub" in output
+        assert "5. Derive single key from path" in output
+        assert "6. Derive key range" in output
+        assert "7. Export keys" in output
+        assert "9. Exit" in output
 
 
 class TestMenuHandlers:
@@ -56,13 +100,14 @@ class TestMenuHandlers:
         """Test that get_menu_handlers returns correct mapping."""
         handlers = get_menu_handlers()
 
-        assert len(handlers) == 6  # All choices except EXIT
+        assert len(handlers) == 8  # All choices except EXIT
         assert MenuChoice.LOAD_FROM_MNEMONIC in handlers
         assert MenuChoice.LOAD_FROM_XPRV in handlers
         assert MenuChoice.GENERATE_NEW_WALLET in handlers
         assert MenuChoice.SHOW_MASTER_XPUB in handlers
         assert MenuChoice.DERIVE_SINGLE_KEY in handlers
         assert MenuChoice.DERIVE_KEY_RANGE in handlers
+        assert MenuChoice.EXPORT_KEYS in handlers
         assert MenuChoice.EXIT not in handlers
 
     @patch("builtins.input", return_value="test mnemonic")
@@ -103,29 +148,25 @@ class TestMenuHandlers:
         assert "✗ Empty xprv provided" in captured.out
         self.mock_wallet.load_from_xprv.assert_not_called()
 
-    @patch("builtins.input", return_value="abc123")
+    @patch("builtins.input", side_effect=["1", "abc123"])
     def test_handle_generate_new_wallet_with_entropy(self, mock_input) -> None:
-        """Test new wallet generation with entropy."""
+        """Test new wallet generation with custom entropy choice."""
         self.mock_wallet.generate_new_wallet.return_value = True
 
         handle_generate_new_wallet(self.mock_wallet)
 
-        mock_input.assert_called_once_with(
-            "Enter entropy (hex, or press Enter for random): "
-        )
+        assert mock_input.call_count == 2
         self.mock_wallet.generate_new_wallet.assert_called_once_with("abc123")
 
-    @patch("builtins.input", return_value="")
-    def test_handle_generate_new_wallet_no_entropy(self, mock_input) -> None:
-        """Test new wallet generation without entropy."""
-        self.mock_wallet.generate_new_wallet.return_value = True
+    @patch("builtins.input", return_value="2")
+    def test_handle_generate_new_wallet_secure_random(self, mock_input) -> None:
+        """Test new wallet generation with secure random choice."""
+        self.mock_wallet.generate_new_wallet_secure.return_value = True
 
         handle_generate_new_wallet(self.mock_wallet)
 
-        mock_input.assert_called_once_with(
-            "Enter entropy (hex, or press Enter for random): "
-        )
-        self.mock_wallet.generate_new_wallet.assert_called_once_with(None)
+        mock_input.assert_called_once()
+        self.mock_wallet.generate_new_wallet_secure.assert_called_once()
 
     def test_handle_show_master_xpub(self) -> None:
         """Test master xpub display handler."""
@@ -204,3 +245,96 @@ class TestMenuHandlers:
         captured = capsys.readouterr()
         assert "✗ Invalid indices provided" in captured.out
         self.mock_wallet.derive_keys_range.assert_not_called()
+
+
+class TestChoiceValidation:
+    """Test class for choice validation functionality."""
+
+    def setup_method(self) -> None:
+        """Set up test fixtures."""
+        self.mock_wallet = MagicMock()
+
+    def test_get_valid_choices_no_wallet(self) -> None:
+        """Test valid choices with no wallet loaded."""
+        self.mock_wallet.is_wallet_loaded = False
+        self.mock_wallet.has_derived_keys = False
+
+        valid_choices = get_valid_choices(self.mock_wallet)
+
+        expected_choices = ["1", "2", "3", "8", "9"]  # Basic options + decrypt + exit
+        assert valid_choices == expected_choices
+
+    def test_get_valid_choices_wallet_loaded(self) -> None:
+        """Test valid choices with wallet loaded."""
+        self.mock_wallet.is_wallet_loaded = True
+        self.mock_wallet.has_derived_keys = False
+
+        valid_choices = get_valid_choices(self.mock_wallet)
+
+        expected_choices = ["1", "2", "3", "8", "9", "4", "5", "6"]  # Basic + wallet options
+        assert valid_choices == expected_choices
+
+    def test_get_valid_choices_keys_derived(self) -> None:
+        """Test valid choices with keys derived."""
+        self.mock_wallet.is_wallet_loaded = True
+        self.mock_wallet.has_derived_keys = True
+
+        valid_choices = get_valid_choices(self.mock_wallet)
+
+        expected_choices = ["1", "2", "3", "8", "9", "4", "5", "6", "7"]  # All options
+        assert valid_choices == expected_choices
+
+
+class TestExportHandlers:
+    """Test class for export handler functions."""
+
+    def setup_method(self) -> None:
+        """Set up test fixtures."""
+        self.mock_wallet = MagicMock()
+
+    def test_handle_export_keys_no_keys(self, capsys) -> None:
+        """Test export handler with no keys available."""
+        self.mock_wallet.has_derived_keys = False
+
+        handle_export_keys(self.mock_wallet)
+
+        captured = capsys.readouterr()
+        assert "✗ No keys available to export" in captured.out
+
+    @patch("builtins.input", side_effect=["5"])  # Back to main
+    def test_handle_export_keys_back_to_main(self, mock_input) -> None:
+        """Test export handler going back to main menu."""
+        self.mock_wallet.has_derived_keys = True
+
+        handle_export_keys(self.mock_wallet)
+
+    @patch("builtins.input", return_value="test_filename")
+    def test_handle_save_json_format_success(self, mock_input) -> None:
+        """Test JSON format save handler."""
+        self.mock_wallet.has_derived_keys = True
+        self.mock_wallet.last_derived_keys = [("m/0/0", "wif", "pubkey", "address")]
+        self.mock_wallet.save_keys_json_format.return_value = True
+
+        handle_save_json_format(self.mock_wallet)
+
+        self.mock_wallet.save_keys_json_format.assert_called_once_with(
+            self.mock_wallet.last_derived_keys, "test_filename"
+        )
+
+    def test_handle_save_json_format_no_keys(self, capsys) -> None:
+        """Test JSON format save handler with no keys."""
+        self.mock_wallet.last_derived_keys = []
+
+        handle_save_json_format(self.mock_wallet)
+
+        captured = capsys.readouterr()
+        assert "✗ No keys available to save" in captured.out
+
+    def test_handle_encrypted_export_no_keys(self, capsys) -> None:
+        """Test encrypted export handler with no keys available."""
+        self.mock_wallet.has_derived_keys = False
+
+        handle_encrypted_export(self.mock_wallet)
+
+        captured = capsys.readouterr()
+        assert "✗ No keys available to export" in captured.out
