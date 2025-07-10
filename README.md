@@ -22,10 +22,13 @@ A Python tool for offline derivation of Bitcoin SV (BSV) wallet keys from either
 - ✅ **Multiple Input Methods**: Load from mnemonic seed phrase or master private key (xprv)
 - ✅ **Flexible Key Derivation**: Support for custom BIP32 derivation paths
 - ✅ **Batch Generation**: Generate multiple keys in ranges
+- ✅ **Multiple Export Formats**: JSON, Simple CSV, and Detailed CSV export options
+- ✅ **🔐 AES-256 Encryption**: Password-protected encrypted export with PBKDF2 key derivation
+- ✅ **🔓 File Decryption**: Decrypt previously encrypted key files
 - ✅ **ElectrumSV Compatible**: Compatible with ElectrumSV wallet format
 - ✅ **Interactive CLI**: User-friendly command-line interface
 - ✅ **Professional Package Structure**: Well-organized modular codebase
-- ✅ **Comprehensive Testing**: 55+ unit tests with 86% code coverage
+- ✅ **Comprehensive Testing**: 85+ unit tests with high code coverage
 - ✅ **Professional Development Setup**: Complete linting, formatting, and testing workflow
 - ✅ **Console Command**: Easy-to-use `xprv-gen` command after installation
 
@@ -36,10 +39,11 @@ xprv-gen/
 ├── xprv_gen/              # Main package
 │   ├── __init__.py        # Package exports
 │   ├── constants.py       # Constants and enums
+│   ├── exceptions.py      # Custom exceptions
 │   ├── wallet.py          # Core wallet functionality
 │   ├── ui.py              # User interface components
 │   └── cli.py             # CLI application logic
-├── tests/                 # Test suite (55+ tests)
+├── tests/                 # Test suite (85+ tests)
 │   ├── test_constants.py  # Constants and enum tests
 │   ├── test_wallet.py     # Wallet functionality tests
 │   ├── test_ui.py         # UI component tests
@@ -92,7 +96,7 @@ After installation, you can use the `xprv-gen` command directly:
 xprv-gen
 
 # Test mode with example data
-xprv-gen test
+xprv-gen --test
 ```
 
 ### Using Makefile Commands
@@ -130,7 +134,7 @@ make help
 python -m xprv_gen.cli
 
 # Test mode
-python -m xprv_gen.cli test
+python -m xprv_gen.cli --test
 ```
 
 ### Menu Options
@@ -158,11 +162,49 @@ python -m xprv_gen.cli test
    - Generate multiple keys in a range
    - Example: `m/44'/0'/0'` indices 0-10
 
+7. **Export keys** 🆕
+   - Export derived keys in multiple formats
+   - **Simple CSV**: Basic address and key pairs
+   - **Detailed CSV**: Includes derivation paths
+   - **JSON**: Structured format with metadata
+   - **🔐 Encrypted Export**: Password-protected files
+
+8. **Decrypt file** 🆕
+   - Decrypt previously encrypted key files
+   - Supports all encrypted formats
+   - Secure password verification
+
+## 🔐 Encryption Features
+
+### Secure Key Export
+- **AES-256 Encryption**: Industry-standard encryption algorithm
+- **PBKDF2 Key Derivation**: 2048 iterations for password-based key derivation
+- **Password Protection**: Double-entry password confirmation
+- **Multiple Formats**: Encrypt JSON, Simple CSV, or Detailed CSV
+- **Secure File Extension**: `.enc` extension for encrypted files
+
+### Decryption Capabilities
+- **Password-based Decryption**: Secure password verification
+- **Format Preservation**: Maintains original export format
+- **Error Handling**: Clear feedback for invalid passwords or corrupted files
+- **Flexible Output**: Custom output filenames supported
+
+### Example Encryption Workflow
+```bash
+1. Derive keys (options 5 or 6)
+2. Choose Export Keys (option 7)
+3. Select Encrypted Export (option 4)
+4. Choose format (JSON, Simple CSV, or Detailed CSV)
+5. Enter secure password (hidden input)
+6. Confirm password
+7. Keys saved as password-protected .enc file
+```
+
 ## Testing
 
 ### Test Suite Overview
 
-The project includes a comprehensive test suite with 55+ unit tests:
+The project includes a comprehensive test suite with 85+ unit tests:
 
 - **test_constants.py**: Tests for constants and enums
 - **test_wallet.py**: Core wallet functionality tests with mocking
@@ -190,10 +232,10 @@ pytest --cov=xprv_gen --cov-report=html
 
 ### Test Quality Metrics
 
-- **Test Coverage**: 86% (excluding test files)
-- **Total Tests**: 55+ comprehensive unit tests
+- **Total Tests**: 85+ comprehensive unit tests
 - **Mocking**: Extensive use of pytest mocks for external dependencies
 - **Test Types**: Unit tests, validation tests, error handling tests
+- **Coverage**: High code coverage with professional testing standards
 
 ## Development
 
@@ -227,7 +269,6 @@ This project includes a complete professional development environment:
 ### Code Quality Standards
 
 - **Pylint Score**: 10.00/10 (perfect)
-- **Test Coverage**: 86% minimum
 - **Line Length**: ≤88 characters
 - **Type Hints**: Full coverage with strict mypy
 - **Documentation**: Comprehensive docstrings
@@ -257,9 +298,17 @@ This project includes a complete professional development environment:
 - **Electrum**: Uses PBKDF2 with "electrum" salt
 - Both use 2048 iterations for key stretching
 
+### Encryption Implementation
+- **Algorithm**: AES-256 in CBC mode
+- **Key Derivation**: PBKDF2 with 2048 iterations
+- **Salt**: Cryptographically secure random salt
+- **Padding**: PKCS7 padding for block cipher
+- **Encoding**: Base64 encoding for encrypted output
+
 ### Package Architecture
 - **Modular Design**: Separated concerns into focused modules
 - **Single Responsibility**: Each module has a clear purpose
+- **Exception Handling**: Comprehensive custom exception hierarchy
 - **Type Safety**: Comprehensive type hints and mypy validation
 - **Error Handling**: Robust error handling with detailed messages
 - **Testing**: Extensive test coverage with mocking
@@ -268,9 +317,11 @@ This project includes a complete professional development environment:
 
 1. **Offline Usage**: Run this tool on an air-gapped computer
 2. **Secure Storage**: Store seed phrases in secure, offline locations
-3. **Test First**: Always test with small amounts before trusting large sums
-4. **Multiple Backups**: Keep multiple secure backups of your seed phrases
-5. **Never Share**: Never share your seed phrases or private keys
+3. **Strong Passwords**: Use strong, unique passwords for encrypted exports
+4. **Test First**: Always test with small amounts before trusting large sums
+5. **Multiple Backups**: Keep multiple secure backups of your seed phrases
+6. **Never Share**: Never share your seed phrases or private keys
+7. **Verify Integrity**: Always verify the integrity of encrypted files
 
 ## Example Output
 
@@ -292,6 +343,7 @@ Match: True
 - Python 3.13+ (tested)
 - bsv-sdk>=1.0.0
 - mnemonic>=0.19
+- cryptography>=41.0.0 (for encryption features)
 
 ### Development Dependencies
 - pytest>=7.0.0 (testing framework)

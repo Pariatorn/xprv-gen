@@ -86,6 +86,7 @@ class TestMenuChoice:
         assert MenuChoice.DERIVE_SINGLE_KEY.value == "5"
         assert MenuChoice.DERIVE_KEY_RANGE.value == "6"
         assert MenuChoice.EXPORT_KEYS.value == "7"
+        assert MenuChoice.DECRYPT_FILE.value == "8"
         assert MenuChoice.EXIT.value == "9"
 
     def test_menu_choice_count(self) -> None:
@@ -101,6 +102,7 @@ class TestMenuChoice:
         assert MenuChoice("5") == MenuChoice.DERIVE_SINGLE_KEY
         assert MenuChoice("6") == MenuChoice.DERIVE_KEY_RANGE
         assert MenuChoice("7") == MenuChoice.EXPORT_KEYS
+        assert MenuChoice("8") == MenuChoice.DECRYPT_FILE
         assert MenuChoice("9") == MenuChoice.EXIT
 
     def test_invalid_menu_choice(self) -> None:
@@ -174,6 +176,7 @@ class TestMenuConfiguration:
         assert MenuChoice.LOAD_FROM_MNEMONIC in INITIAL_MENU_CHOICES
         assert MenuChoice.LOAD_FROM_XPRV in INITIAL_MENU_CHOICES
         assert MenuChoice.GENERATE_NEW_WALLET in INITIAL_MENU_CHOICES
+        assert MenuChoice.DECRYPT_FILE in INITIAL_MENU_CHOICES
         assert MenuChoice.EXIT in INITIAL_MENU_CHOICES
 
     def test_wallet_loaded_choices(self) -> None:

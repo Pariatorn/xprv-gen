@@ -9,7 +9,6 @@ import sys
 from unittest.mock import MagicMock, patch
 
 from xprv_gen.cli import cli_main, main, run_test_mode
-from xprv_gen.constants import MenuChoice
 
 
 class TestRunTestMode:
@@ -21,14 +20,18 @@ class TestRunTestMode:
         mock_wallet = MagicMock()
         mock_wallet_class.return_value = mock_wallet
 
-        # Setup mock return values
-        mock_wallet.generate_new_wallet.return_value = True
-        mock_wallet.get_master_xpub.return_value = "xpub123"
-        mock_wallet.derive_single_key.return_value = ("wif", "pubkey", "address")
+        # Setup mock return values to match new architecture
+        mock_wallet.generate_new_wallet.return_value = ("test mnemonic", "test_entropy")
+        mock_wallet.get_master_xpub.return_value = "test_xpub"
+        mock_wallet.derive_single_key.return_value = (
+            "m/0/1234",
+            "test_wif",
+            "test_pubkey",
+            "test_address",
+        )
         mock_wallet.derive_keys_range.return_value = [
-            ("m/44'/0'/0'/0/0", "wif0", "pub0", "addr0"),
-            ("m/44'/0'/0'/0/1", "wif1", "pub1", "addr1"),
-            ("m/44'/0'/0'/0/2", "wif2", "pub2", "addr2"),
+            ("m/44'/0'/0'/0/0", "wif1", "pubkey1", "address1"),
+            ("m/44'/0'/0'/0/1", "wif2", "pubkey2", "address2"),
         ]
 
         run_test_mode()
@@ -53,97 +56,100 @@ class TestRunTestMode:
 class TestMain:
     """Test class for main application loop."""
 
+    @patch("xprv_gen.cli.input", side_effect=["9"])
     @patch("xprv_gen.cli.HDWalletTool")
-    @patch("xprv_gen.cli.get_menu_handlers")
+    @patch("xprv_gen.cli.get_valid_choices", return_value=["9"])
     @patch("xprv_gen.cli.print_menu")
-    @patch("builtins.input", side_effect=["9"])  # Choose exit (new exit choice)
     def test_main_exit(
-        self, mock_input, mock_print_menu, mock_get_handlers, mock_wallet_class, capsys
+        self,
+        mock_print_menu,
+        mock_get_valid_choices,
+        mock_wallet_class,
+        mock_input,
+        capsys,
     ) -> None:
         """Test main loop with immediate exit."""
         mock_wallet = MagicMock()
         mock_wallet.is_wallet_loaded = False
-        mock_wallet.has_derived_keys = False
         mock_wallet_class.return_value = mock_wallet
-        mock_get_handlers.return_value = {}
+        mock_get_valid_choices.return_value = ["1", "2", "3", "8", "9"]
 
         main()
 
         # Verify exit message
         captured = capsys.readouterr()
         assert "Goodbye!" in captured.out
-
-        # Verify menu was printed
         mock_print_menu.assert_called()
 
+    @patch("xprv_gen.cli.input", side_effect=["1", "", "9"])
     @patch("xprv_gen.cli.HDWalletTool")
-    @patch("xprv_gen.cli.get_menu_handlers")
+    @patch("xprv_gen.cli.get_valid_choices", return_value=["1"])
     @patch("xprv_gen.cli.print_menu")
-    @patch(
-        "builtins.input", side_effect=["1", "", "9"]
-    )  # Choose option 1, press enter, then exit
+    @patch("xprv_gen.cli.handle_load_from_mnemonic")
     def test_main_valid_choice(
-        self, mock_input, mock_print_menu, mock_get_handlers, mock_wallet_class
+        self,
+        mock_handler,
+        mock_print_menu,
+        mock_get_valid_choices,
+        mock_wallet_class,
+        mock_input,
     ) -> None:
         """Test main loop with valid menu choice."""
         mock_wallet = MagicMock()
         mock_wallet.is_wallet_loaded = False
-        mock_wallet.has_derived_keys = False
         mock_wallet_class.return_value = mock_wallet
-        mock_handler = MagicMock()
-        mock_get_handlers.return_value = {MenuChoice.LOAD_FROM_MNEMONIC: mock_handler}
+        mock_get_valid_choices.return_value = ["1", "2", "3", "8", "9"]
 
         main()
 
-        # Verify handler was called
-        mock_handler.assert_called_once_with(mock_wallet)
-
-        # Verify menu was printed at least twice (once for each iteration)
+        mock_handler.assert_called_once()
         assert mock_print_menu.call_count >= 2
 
+    @patch("xprv_gen.cli.input", side_effect=["10", "", "9"])
     @patch("xprv_gen.cli.HDWalletTool")
-    @patch("xprv_gen.cli.get_menu_handlers")
+    @patch("xprv_gen.cli.get_valid_choices", return_value=["1", "2", "3", "9"])
     @patch("xprv_gen.cli.print_menu")
-    @patch(
-        "builtins.input", side_effect=["invalid", "", "9"]
-    )  # Invalid choice, press enter, then exit
     def test_main_invalid_choice(
-        self, mock_input, mock_print_menu, mock_get_handlers, mock_wallet_class, capsys
+        self,
+        mock_print_menu,
+        mock_get_valid_choices,
+        mock_wallet_class,
+        mock_input,
+        capsys,
     ) -> None:
         """Test main loop with invalid menu choice."""
         mock_wallet = MagicMock()
         mock_wallet.is_wallet_loaded = False
-        mock_wallet.has_derived_keys = False
         mock_wallet_class.return_value = mock_wallet
-        mock_get_handlers.return_value = {}
+        mock_get_valid_choices.return_value = ["1", "2", "3", "8", "9"]
 
         main()
 
-        # Verify error message (updated to reflect choice validation)
         captured = capsys.readouterr()
         assert (
             "✗ Invalid choice or option not available in current state." in captured.out
         )
 
+    @patch("xprv_gen.cli.input", side_effect=["invalid", "", "9"])
     @patch("xprv_gen.cli.HDWalletTool")
-    @patch("xprv_gen.cli.get_menu_handlers")
+    @patch("xprv_gen.cli.get_valid_choices", return_value=["1", "2", "3", "9"])
     @patch("xprv_gen.cli.print_menu")
-    @patch(
-        "builtins.input", side_effect=["10", "", "9"]
-    )  # Invalid number, press enter, then exit
     def test_main_invalid_number(
-        self, mock_input, mock_print_menu, mock_get_handlers, mock_wallet_class, capsys
+        self,
+        mock_print_menu,
+        mock_get_valid_choices,
+        mock_wallet_class,
+        mock_input,
+        capsys,
     ) -> None:
         """Test main loop with invalid menu number."""
         mock_wallet = MagicMock()
         mock_wallet.is_wallet_loaded = False
-        mock_wallet.has_derived_keys = False
         mock_wallet_class.return_value = mock_wallet
-        mock_get_handlers.return_value = {}
+        mock_get_valid_choices.return_value = ["1", "2", "3", "8", "9"]
 
         main()
 
-        # Verify error message (choice validation comes first)
         captured = capsys.readouterr()
         assert (
             "✗ Invalid choice or option not available in current state." in captured.out
@@ -158,7 +164,7 @@ class TestCliMain:
     def test_cli_main_test_mode(self, mock_main, mock_run_test_mode) -> None:
         """Test CLI main with test mode argument."""
         # Mock sys.argv to include test argument
-        with patch.object(sys, "argv", ["script.py", "test"]):
+        with patch.object(sys, "argv", ["script.py", "--test"]):
             cli_main()
 
             mock_run_test_mode.assert_called_once()
@@ -193,7 +199,7 @@ class TestCliMain:
     ) -> None:
         """Test CLI main with test mode and other arguments."""
         # Mock sys.argv to have test as first argument
-        with patch.object(sys, "argv", ["script.py", "test", "other"]):
+        with patch.object(sys, "argv", ["script.py", "--test", "other"]):
             cli_main()
 
             mock_run_test_mode.assert_called_once()
