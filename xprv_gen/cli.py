@@ -18,7 +18,7 @@ def main() -> None:
     menu_handlers = get_menu_handlers()
 
     while True:
-        print_menu()
+        print_menu(wallet)
         choice = input("Enter your choice (1-9): ").strip()
 
         # Convert string choice to enum

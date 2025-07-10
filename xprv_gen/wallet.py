@@ -9,9 +9,12 @@ and address generation.
 import csv
 import hashlib
 import hmac
+import json
+import os
+import secrets
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import bsv.hd
 
@@ -36,6 +39,16 @@ class HDWalletTool:
         self.master_xprv: Optional[bsv.hd.Xprv] = None
         self.mnemonic: Optional[str] = None
         self.last_derived_keys: List[Tuple[str, str, str, str]] = []
+
+    @property
+    def is_wallet_loaded(self) -> bool:
+        """Check if wallet is loaded."""
+        return self.master_xprv is not None
+
+    @property
+    def has_derived_keys(self) -> bool:
+        """Check if keys have been derived."""
+        return len(self.last_derived_keys) > 0
 
     def load_from_mnemonic(self, mnemonic: str) -> bool:
         """Load wallet from mnemonic seed phrase."""
@@ -324,6 +337,30 @@ class HDWalletTool:
             print(f"✗ Error generating new wallet: {e}")
             return False
 
+    def generate_new_wallet_secure(self) -> bool:
+        """Generate a new wallet using cryptographically secure random entropy."""
+        try:
+            # Generate cryptographically secure random entropy (32 bytes = 256 bits)
+            secure_entropy = secrets.token_bytes(32)
+            entropy_hex = secure_entropy.hex()
+
+            print("✓ Using cryptographically secure random entropy")
+            print(f"✓ Entropy source: os.urandom() via secrets module")
+            print(f"✓ Entropy strength: 256 bits")
+
+            # Generate mnemonic from secure entropy
+            mnemonic = bsv.hd.mnemonic_from_entropy(entropy_hex)
+
+            print("✓ Generated new wallet with secure entropy")
+            print(f"✓ Entropy: {entropy_hex}")
+            print(f"✓ Mnemonic: {mnemonic}")
+
+            return self.load_from_mnemonic(mnemonic)
+
+        except Exception as e:
+            print(f"✗ Error generating secure wallet: {e}")
+            return False
+
     def save_keys_simple_format(
         self,
         keys_data: List[Tuple[str, str, str, str]],
@@ -424,4 +461,81 @@ class HDWalletTool:
 
         except Exception as e:
             print(f"✗ Error saving keys in detailed format: {e}")
+            return False
+
+    def save_keys_json_format(
+        self,
+        keys_data: List[Tuple[str, str, str, str]],
+        filename: Optional[str] = None,
+    ) -> bool:
+        """
+        Save keys in JSON format with rich metadata.
+
+        Args:
+            keys_data: List of (derivation_path, wif, public_key_hex, address) tuples
+            filename: Optional filename (without extension)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not keys_data:
+            print("✗ No keys data provided")
+            return False
+
+        try:
+            # Generate filename if not provided
+            if not filename:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{DEFAULT_SAVE_FILENAME}_export_{timestamp}"
+
+            # Ensure JSON extension
+            if not filename.endswith(".json"):
+                filename += ".json"
+
+            # Create Path object
+            file_path = Path(filename)
+
+            # Build JSON structure
+            export_data: Dict[str, Any] = {
+                "export_info": {
+                    "timestamp": datetime.now().isoformat(),
+                    "format_version": "1.0",
+                    "total_keys": len(keys_data),
+                    "wallet_type": "BSV",
+                    "exported_by": "BSV HD Wallet Key Derivation Tool",
+                },
+                "keys": []
+            }
+
+            # Add key data
+            for i, (derivation_path, wif, public_key_hex, address) in enumerate(keys_data):
+                key_entry = {
+                    "index": i,
+                    "derivation_path": derivation_path,
+                    "address": address,
+                    "private_key_wif": wif,
+                    "public_key_hex": public_key_hex,
+                    "address_type": "P2PKH",
+                    "created_at": datetime.now().isoformat(),
+                }
+                export_data["keys"].append(key_entry)
+
+            # Calculate checksums for verification
+            keys_json = json.dumps(export_data["keys"], sort_keys=True)
+            export_data["checksums"] = {
+                "sha256": hashlib.sha256(keys_json.encode()).hexdigest(),
+                "md5": hashlib.md5(keys_json.encode()).hexdigest(),
+            }
+
+            # Write JSON file
+            with open(file_path, "w", encoding="utf-8") as jsonfile:
+                json.dump(export_data, jsonfile, indent=2, ensure_ascii=False)
+
+            print(f"✓ Successfully saved {len(keys_data)} keys to {file_path}")
+            print("✓ Format: JSON with metadata and checksums")
+            print(f"✓ File size: {file_path.stat().st_size} bytes")
+            return True
+
+        except Exception as e:
+            print(f"✗ Error saving keys in JSON format: {e}")
             return False

@@ -6,6 +6,7 @@ used throughout the application.
 """
 
 from enum import Enum
+from typing import List
 
 # Seed and key constants
 SEED_LENGTH_64 = 64
@@ -30,12 +31,44 @@ CSV_EXTENSION = ".csv"
 class MenuChoice(Enum):
     """Menu choice enumeration for the CLI interface."""
 
+    # Always available options
     LOAD_FROM_MNEMONIC = "1"
     LOAD_FROM_XPRV = "2"
     GENERATE_NEW_WALLET = "3"
+    EXIT = "9"
+
+    # Available after wallet is loaded
     SHOW_MASTER_XPUB = "4"
     DERIVE_SINGLE_KEY = "5"
     DERIVE_KEY_RANGE = "6"
-    SAVE_SIMPLE_FORMAT = "7"
-    SAVE_DETAILED_FORMAT = "8"
-    EXIT = "9"
+
+    # Available after keys are derived
+    EXPORT_KEYS = "7"
+
+
+class ExportChoice(Enum):
+    """Export submenu choice enumeration."""
+
+    EXPORT_SIMPLE_CSV = "1"
+    EXPORT_DETAILED_CSV = "2"
+    EXPORT_JSON = "3"
+    BACK_TO_MAIN = "4"
+
+
+# Menu configuration
+INITIAL_MENU_CHOICES: List[MenuChoice] = [
+    MenuChoice.LOAD_FROM_MNEMONIC,
+    MenuChoice.LOAD_FROM_XPRV,
+    MenuChoice.GENERATE_NEW_WALLET,
+    MenuChoice.EXIT,
+]
+
+WALLET_LOADED_CHOICES: List[MenuChoice] = [
+    MenuChoice.SHOW_MASTER_XPUB,
+    MenuChoice.DERIVE_SINGLE_KEY,
+    MenuChoice.DERIVE_KEY_RANGE,
+]
+
+KEYS_DERIVED_CHOICES: List[MenuChoice] = [
+    MenuChoice.EXPORT_KEYS,
+]

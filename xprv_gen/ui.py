@@ -5,27 +5,53 @@ This module contains the CLI menu system and all the input/output handling
 functions for the interactive interface.
 """
 
-from typing import Callable, Dict
+from typing import Callable, Dict, List
 
-from .constants import MenuChoice
+from .constants import (
+    ExportChoice,
+    INITIAL_MENU_CHOICES,
+    KEYS_DERIVED_CHOICES,
+    MenuChoice,
+    WALLET_LOADED_CHOICES,
+)
 from .wallet import HDWalletTool
 
 
-def print_menu() -> None:
-    """Print the main menu."""
+def print_menu(wallet: HDWalletTool) -> None:
+    """Print the dynamic menu based on wallet state."""
     print("\n" + "=" * 60)
     print("BSV HD Wallet Key Derivation Tool")
     print("=" * 60)
+    
+    # Always available options
     print("1. Load wallet from mnemonic seed phrase")
     print("2. Load wallet from master private key (xprv)")
     print("3. Generate new wallet")
-    print("4. Show master xpub")
-    print("5. Derive single key from path (e.g., m/0/1234)")
-    print("6. Derive key range (e.g., m/44'/0'/0' indices 0-10)")
-    print("7. Save keys (simple format: address,key)")
-    print("8. Save keys (detailed format: derivation,address,key)")
+    
+    # Show wallet options if wallet is loaded
+    if wallet.is_wallet_loaded:
+        print("4. Show master xpub")
+        print("5. Derive single key from path (e.g., m/0/1234)")
+        print("6. Derive key range (e.g., m/44'/0'/0' indices 0-10)")
+        
+        # Show export option if keys are derived
+        if wallet.has_derived_keys:
+            print("7. Export keys")
+    
     print("9. Exit")
     print("=" * 60)
+
+
+def print_export_menu() -> None:
+    """Print the export submenu."""
+    print("\n" + "=" * 50)
+    print("Export Keys")
+    print("=" * 50)
+    print("1. Export as simple CSV (address,key)")
+    print("2. Export as detailed CSV (derivation,address,key)")
+    print("3. Export as JSON (structured format)")
+    print("4. Back to main menu")
+    print("=" * 50)
 
 
 def handle_load_from_mnemonic(wallet: HDWalletTool) -> None:
@@ -51,9 +77,22 @@ def handle_load_from_xprv(wallet: HDWalletTool) -> None:
 def handle_generate_new_wallet(wallet: HDWalletTool) -> None:
     """Handle generating new wallet."""
     print("\n--- Generate New Wallet ---")
-    entropy_input = input("Enter entropy (hex, or press Enter for random): ").strip()
-    entropy = entropy_input if entropy_input else None
-    wallet.generate_new_wallet(entropy)
+    print("1. Generate with custom entropy (advanced)")
+    print("2. Generate with secure random entropy (recommended)")
+    print("3. Back to main menu")
+    
+    choice = input("Enter your choice (1-3): ").strip()
+    
+    if choice == "1":
+        entropy_input = input("Enter entropy (hex, or press Enter for random): ").strip()
+        entropy = entropy_input if entropy_input else None
+        wallet.generate_new_wallet(entropy)
+    elif choice == "2":
+        wallet.generate_new_wallet_secure()
+    elif choice == "3":
+        return
+    else:
+        print("✗ Invalid choice")
 
 
 def handle_show_master_xpub(wallet: HDWalletTool) -> None:
@@ -117,6 +156,50 @@ def handle_save_detailed_format(wallet: HDWalletTool) -> None:
     wallet.save_keys_detailed_format(wallet.last_derived_keys, filename)
 
 
+def handle_export_keys(wallet: HDWalletTool) -> None:
+    """Handle the export keys submenu."""
+    if not wallet.has_derived_keys:
+        print("✗ No keys available to export")
+        print("  Please derive keys first using options 5 or 6")
+        return
+    
+    while True:
+        print_export_menu()
+        choice = input("Enter your choice (1-4): ").strip()
+        
+        try:
+            export_choice = ExportChoice(choice)
+            
+            if export_choice == ExportChoice.EXPORT_SIMPLE_CSV:
+                handle_save_simple_format(wallet)
+            elif export_choice == ExportChoice.EXPORT_DETAILED_CSV:
+                handle_save_detailed_format(wallet)
+            elif export_choice == ExportChoice.EXPORT_JSON:
+                handle_save_json_format(wallet)
+            elif export_choice == ExportChoice.BACK_TO_MAIN:
+                break
+            else:
+                print("✗ Invalid choice")
+                
+        except ValueError:
+            print("✗ Invalid choice")
+
+
+def handle_save_json_format(wallet: HDWalletTool) -> None:
+    """Handle saving keys in JSON format."""
+    print("\n--- Save Keys (JSON Format) ---")
+    
+    if not wallet.last_derived_keys:
+        print("✗ No keys available to save")
+        print("  Please derive keys first using options 5 or 6")
+        return
+    
+    filename_input = input("Enter filename (optional, press Enter for auto-generated): ").strip()
+    filename = filename_input if filename_input else None
+    
+    wallet.save_keys_json_format(wallet.last_derived_keys, filename)
+
+
 def get_menu_handlers() -> Dict[MenuChoice, Callable[[HDWalletTool], None]]:
     """Get the mapping of menu choices to their handler functions."""
     return {
@@ -126,6 +209,5 @@ def get_menu_handlers() -> Dict[MenuChoice, Callable[[HDWalletTool], None]]:
         MenuChoice.SHOW_MASTER_XPUB: handle_show_master_xpub,
         MenuChoice.DERIVE_SINGLE_KEY: handle_derive_single_key,
         MenuChoice.DERIVE_KEY_RANGE: handle_derive_key_range,
-        MenuChoice.SAVE_SIMPLE_FORMAT: handle_save_simple_format,
-        MenuChoice.SAVE_DETAILED_FORMAT: handle_save_detailed_format,
+        MenuChoice.EXPORT_KEYS: handle_export_keys,
     }
